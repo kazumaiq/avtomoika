@@ -30,7 +30,6 @@ export function BottomDock() {
   const setActivePanel = useGameStore((s) => s.setActivePanel);
   const setCameraPreset = useGameStore((s) => s.setCameraPreset);
 
-  // Count how many upgrades the player can currently afford
   const affordableUpgrades = UPGRADE_DEFINITIONS.filter((u) => {
     const lv = upgrades[u.key];
     return lv < u.maxLevel && balance >= getUpgradeCost(u.key, lv);
@@ -40,6 +39,15 @@ export function BottomDock() {
     workersCount < upgrades.bays + 1 &&
     workersCount < 8 &&
     candidates.some((c) => balance >= c.hireCost);
+
+  const currentCamLabel =
+    CAMERA_ITEMS.find((c) => c.id === cameraPreset)?.label ?? 'Обзор';
+
+  const cycleCamera = () => {
+    const idx = CAMERA_ITEMS.findIndex((c) => c.id === cameraPreset);
+    const next = CAMERA_ITEMS[(idx + 1) % CAMERA_ITEMS.length];
+    setCameraPreset(next.id);
+  };
 
   const navItems: Array<{
     id: Exclude<ActivePanel, null>;
@@ -76,14 +84,14 @@ export function BottomDock() {
       badge: compPromo ? '!' : undefined,
       badgeTone: 'coral',
     },
-    { id: 'settings', label: 'Настройки', icon: Settings },
+    { id: 'settings', label: 'Меню', icon: Settings },
   ];
 
   return (
     <div className="bottom-bar">
-      {/* Camera Quick Presets */}
-      <div className="camera-strip hud-interactive">
-        <Camera size={14} color="#64748b" className="hide-mobile" style={{ margin: '0 6px' }} />
+      {/* Desktop: Full Camera Preset Strip */}
+      <div className="camera-strip hud-interactive hide-mobile">
+        <Camera size={14} color="#64748b" style={{ margin: '0 6px' }} />
         {CAMERA_ITEMS.map((c) => (
           <button
             key={c.id}
@@ -94,6 +102,19 @@ export function BottomDock() {
             {c.label}
           </button>
         ))}
+      </div>
+
+      {/* Mobile: Compact Single Camera-Cycle Chip (frees 42px of 3D viewport!) */}
+      <div className="mobile-cam-row show-mobile-only">
+        <button
+          id="btn-cam-cycle"
+          className="mobile-cam-chip hud-interactive"
+          onClick={cycleCamera}
+          title="Переключить камеру"
+        >
+          <Camera size={13} color="#00d4ff" />
+          <span>{currentCamLabel}</span>
+        </button>
       </div>
 
       {/* Main Management Navigation Dock */}

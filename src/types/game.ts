@@ -64,6 +64,15 @@ export interface ToastNotification {
   createdAt: number;
 }
 
+export interface ShiftSummary {
+  day: number;
+  carsWashed: number;
+  revenue: number;
+  expenses: number;
+  profit: number;
+  bestCombo: number;
+}
+
 export interface Vec3 {
   x: number;
   y: number;
@@ -230,6 +239,7 @@ export interface EconomyMetrics {
   combo: number;
   bestCombo: number;
   dailyRevenue: number;
+  dailyExpenses?: number;
   dailyCars: number;
   happyHourRemaining: number;
   happyHourCooldown: number;

@@ -1,153 +1,190 @@
-import { Html } from '@react-three/drei';
-import { useEffect, useState } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import { useEffect, useMemo, useRef } from 'react';
+import * as THREE from 'three';
 import { COMPETITOR_LAYOUT, PLAYER_LAYOUT } from '../../config/worldLayout';
 import { gameSimulation } from '../../engine/simulation';
 import { useGameStore } from '../../store/useGameStore';
 import type { WashStage } from '../../types/game';
 
-interface ActiveBayInfo {
-  id: string;
+interface BaySlotSpec {
+  owner: 'player' | 'competitor';
+  bayIndex: number;
   x: number;
   z: number;
-  progress: number;
-  stage: WashStage;
-  isPlayer: boolean;
-  isVip: boolean;
 }
 
-const STAGE_SHORT: Record<WashStage, { text: string; color: string }> = {
-  none: { text: '', color: '#94a3b8' },
-  greeting: { text: 'ПРИЁМ', color: '#ffb800' },
-  rinse: { text: 'СМЫВ', color: '#38bdf8' },
-  foam: { text: 'ПЕНА', color: '#f8fafc' },
-  scrub: { text: 'МОЙКА', color: '#00d4ff' },
-  dry: { text: 'СУШКА', color: '#22c55e' },
-  done: { text: 'ГОТОВО', color: '#a3e635' },
+const BAY_SLOTS: BaySlotSpec[] = [
+  ...PLAYER_LAYOUT.bayPositions.map((pos, bayIndex) => ({
+    owner: 'player' as const,
+    bayIndex,
+    x: pos.x,
+    z: pos.z,
+  })),
+  ...COMPETITOR_LAYOUT.bayPositions.map((pos, bayIndex) => ({
+    owner: 'competitor' as const,
+    bayIndex,
+    x: pos.x,
+    z: pos.z,
+  })),
+];
+
+const STAGE_COLOR: Record<WashStage, string> = {
+  none: '#94A3B8',
+  greeting: '#FFB800',
+  rinse: '#38BDF8',
+  foam: '#F0F9FF',
+  scrub: '#00D4FF',
+  dry: '#22C55E',
+  done: '#A3E635',
 };
 
+const BAR_WIDTH = 2.15;
+
+/**
+ * 100% pure WebGL wet puddles + billboarded 3D wash progress bars.
+ * Zero DOM/<Html> overlays and zero React state updates per frame -> locked 60 FPS on iOS!
+ */
 export function WashProgressBars() {
-  const started = useGameStore((s) => s.started);
-  const [activeCars, setActiveCars] = useState<ActiveBayInfo[]>([]);
+  const { camera } = useThree();
+
+  const puddleRefs = useRef<Array<THREE.Mesh | null>>([]);
+  const puddleMatRefs = useRef<Array<THREE.MeshStandardMaterial | null>>([]);
+  const barGroupRefs = useRef<Array<THREE.Group | null>>([]);
+  const barFillRefs = useRef<Array<THREE.Mesh | null>>([]);
+  const barFillMatRefs = useRef<Array<THREE.MeshBasicMaterial | null>>([]);
+  const barBorderMatRefs = useRef<Array<THREE.MeshBasicMaterial | null>>([]);
+
+  const sharedGeos = useMemo(() => {
+    const puddle = new THREE.CircleGeometry(2.35, 20);
+    const border = new THREE.PlaneGeometry(BAR_WIDTH + 0.14, 0.34);
+    const track = new THREE.PlaneGeometry(BAR_WIDTH, 0.22);
+    const fill = new THREE.PlaneGeometry(BAR_WIDTH, 0.22);
+    return { puddle, border, track, fill };
+  }, []);
+
+  const sharedTrackMat = useMemo(
+    () => new THREE.MeshBasicMaterial({ color: '#0B1222', transparent: true, opacity: 0.9 }),
+    []
+  );
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      const list: ActiveBayInfo[] = [];
-      for (const car of gameSimulation.vehicles) {
-        if (car.state === 'washing' && car.bayIndex >= 0) {
-          const layout = car.owner === 'player' ? PLAYER_LAYOUT : COMPETITOR_LAYOUT;
-          const bayPos = layout.bayPositions[car.bayIndex];
-          if (bayPos) {
-            list.push({
-              id: car.id,
-              x: bayPos.x,
-              z: bayPos.z,
-              progress: car.washProgress,
-              stage: car.washStage,
-              isPlayer: car.owner === 'player',
-              isVip: car.isVip,
-            });
-          }
+    return () => {
+      sharedGeos.puddle.dispose();
+      sharedGeos.border.dispose();
+      sharedGeos.track.dispose();
+      sharedGeos.fill.dispose();
+      sharedTrackMat.dispose();
+    };
+  }, [sharedGeos, sharedTrackMat]);
+
+  useFrame(() => {
+    const started = useGameStore.getState().started;
+
+    for (let i = 0; i < BAY_SLOTS.length; i++) {
+      const slot = BAY_SLOTS[i];
+      const car = gameSimulation.getBayVehicle(slot.owner, slot.bayIndex);
+
+      const puddle = puddleRefs.current[i];
+      const puddleMat = puddleMatRefs.current[i];
+      const barGroup = barGroupRefs.current[i];
+      const barFill = barFillRefs.current[i];
+      const fillMat = barFillMatRefs.current[i];
+      const borderMat = barBorderMatRefs.current[i];
+
+      if (!car) {
+        if (puddle) puddle.visible = false;
+        if (barGroup) barGroup.visible = false;
+        continue;
+      }
+
+      if (puddle && puddleMat) {
+        puddle.visible = true;
+        const s = 0.55 + Math.min(1, car.washProgress * 1.35) * 0.52;
+        puddle.scale.set(s, s, 1);
+        puddleMat.color.set(
+          car.washStage === 'foam' || car.washStage === 'scrub' ? '#DCF2FF' : '#38BDF8'
+        );
+      }
+
+      if (barGroup && barFill && fillMat && borderMat) {
+        barGroup.visible = started;
+        if (started) {
+          barGroup.quaternion.copy(camera.quaternion);
+          const pct = Math.max(0.04, Math.min(1, car.washProgress));
+          barFill.scale.set(pct, 1, 1);
+          barFill.position.x = -BAR_WIDTH * 0.5 * (1 - pct);
+          fillMat.color.set(car.isVip ? '#FACC15' : STAGE_COLOR[car.washStage]);
+          borderMat.color.set(
+            car.isVip ? '#FACC15' : slot.owner === 'player' ? '#00D4FF' : '#FF4D4F'
+          );
         }
       }
-      setActiveCars(list);
-    }, 160);
-    return () => window.clearInterval(id);
-  }, []);
+    }
+  });
 
   return (
     <group>
-      {activeCars.map((item) => {
-        const meta = STAGE_SHORT[item.stage];
-        const puddleScale = 0.55 + Math.min(1, item.progress * 1.4) * 0.55;
-        return (
-          <group key={item.id}>
-            {/* Glossy Dynamic Wet Floor Puddle under active wash bay */}
-            <mesh
-              rotation={[-Math.PI / 2, 0, 0]}
-              position={[item.x, 0.115, item.z]}
-              scale={[puddleScale, puddleScale, 1]}
-            >
-              <circleGeometry args={[2.45, 24]} />
-              <meshPhysicalMaterial
-                color={item.stage === 'foam' || item.stage === 'scrub' ? '#DCF2FF' : '#38BDF8'}
-                roughness={0.05}
-                metalness={0.4}
-                clearcoat={1.0}
+      {BAY_SLOTS.map((slot, idx) => (
+        <group key={`${slot.owner}-${slot.bayIndex}`} position={[slot.x, 0, slot.z]}>
+          {/* Glossy Wet Floor Puddle */}
+          <mesh
+            ref={(el) => {
+              puddleRefs.current[idx] = el;
+            }}
+            visible={false}
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[0, 0.115, 0]}
+            geometry={sharedGeos.puddle}
+          >
+            <meshStandardMaterial
+              ref={(el) => {
+                puddleMatRefs.current[idx] = el;
+              }}
+              color="#38BDF8"
+              roughness={0.06}
+              metalness={0.55}
+              transparent
+              opacity={0.36}
+              depthWrite={false}
+            />
+          </mesh>
+
+          {/* Sleek Floating Pure-WebGL 3D Wash Progress Bar */}
+          <group
+            ref={(el) => {
+              barGroupRefs.current[idx] = el;
+            }}
+            visible={false}
+            position={[0, 2.85, 0]}
+          >
+            <mesh geometry={sharedGeos.border} position={[0, 0, -0.01]}>
+              <meshBasicMaterial
+                ref={(el) => {
+                  barBorderMatRefs.current[idx] = el;
+                }}
+                color="#00D4FF"
                 transparent
-                opacity={0.38}
-                depthWrite={false}
+                opacity={0.82}
               />
             </mesh>
-
-            {/* Compact Overhead Wash Stage Indicator (Strictly zIndexRange [1, 4] behind HUD & Panels!) */}
-            {started && (
-              <Html
-                position={[item.x, 2.98, item.z]}
-                center
-                distanceFactor={26}
-                zIndexRange={[1, 4]}
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                <div
-                  style={{
-                    background: 'rgba(10, 15, 28, 0.88)',
-                    border: `1.5px solid ${
-                      item.isVip
-                        ? '#FACC15'
-                        : item.isPlayer
-                          ? 'rgba(0,212,255,0.55)'
-                          : 'rgba(255,77,79,0.5)'
-                    }`,
-                    borderRadius: 8,
-                    padding: '3px 7px',
-                    width: item.isVip ? 104 : 94,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 3,
-                    boxShadow: item.isVip
-                      ? '0 4px 16px rgba(250,204,21,0.35)'
-                      : '0 4px 12px rgba(0,0,0,0.45)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      fontSize: 9,
-                      fontWeight: 700,
-                      fontFamily: '"Space Grotesk", sans-serif',
-                      letterSpacing: '0.04em',
-                      color: item.isVip ? '#FACC15' : meta.color,
-                    }}
-                  >
-                    <span>{item.isVip ? `★ ${meta.text}` : meta.text}</span>
-                    <span>{Math.round(item.progress * 100)}%</span>
-                  </div>
-                  <div
-                    style={{
-                      width: '100%',
-                      height: 4,
-                      borderRadius: 99,
-                      background: 'rgba(255,255,255,0.14)',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${Math.round(item.progress * 100)}%`,
-                        height: '100%',
-                        background: item.isVip ? '#FACC15' : meta.color,
-                        transition: 'width 0.14s linear',
-                      }}
-                    />
-                  </div>
-                </div>
-              </Html>
-            )}
+            <mesh geometry={sharedGeos.track} material={sharedTrackMat} position={[0, 0, 0]} />
+            <mesh
+              ref={(el) => {
+                barFillRefs.current[idx] = el;
+              }}
+              geometry={sharedGeos.fill}
+              position={[0, 0, 0.01]}
+            >
+              <meshBasicMaterial
+                ref={(el) => {
+                  barFillMatRefs.current[idx] = el;
+                }}
+                color="#00D4FF"
+              />
+            </mesh>
           </group>
-        );
-      })}
+        </group>
+      ))}
     </group>
   );
 }

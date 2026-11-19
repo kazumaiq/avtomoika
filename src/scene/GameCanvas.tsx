@@ -1,5 +1,5 @@
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Component, type ErrorInfo, type ReactNode, useEffect } from 'react';
+import { Component, type ErrorInfo, type ReactNode, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { gameSimulation } from '../engine/simulation';
 import { useGameStore } from '../store/useGameStore';
@@ -83,9 +83,25 @@ function SimulationDriver() {
 export function GameCanvas() {
   const quality = useGameStore((s) => s.settings.quality);
   const setSelection = useGameStore((s) => s.setSelection);
+  const [isPortraitMobile, setIsPortraitMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 768
+  );
 
+  useEffect(() => {
+    const onResize = () => setIsPortraitMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Tuned DPR for crisp Retina clarity + locked 60 FPS on iPhone 15 Pro even at High quality!
   const dpr: [number, number] =
-    quality === 'high' ? [1, 2] : quality === 'medium' ? [1, 1.5] : [0.75, 1];
+    quality === 'high'
+      ? isPortraitMobile
+        ? [1, 1.75]
+        : [1, 2]
+      : quality === 'medium'
+        ? [1, 1.35]
+        : [0.85, 1];
 
   return (
     <WebGLErrorBoundary>
@@ -93,12 +109,17 @@ export function GameCanvas() {
         <Canvas
           shadows={quality !== 'low'}
           dpr={dpr}
-          camera={{ position: [27, 23, 31], fov: 44, near: 0.5, far: 260 }}
+          camera={{
+            position: isPortraitMobile ? [24, 24, 34] : [25, 21, 29],
+            fov: isPortraitMobile ? 52 : 44,
+            near: 0.5,
+            far: 250,
+          }}
           gl={{
             antialias: quality !== 'low',
             powerPreference: 'high-performance',
             toneMapping: THREE.ACESFilmicToneMapping,
-            toneMappingExposure: 1.16,
+            toneMappingExposure: 1.15,
           }}
           onPointerMissed={() => setSelection(null)}
         >
@@ -112,7 +133,7 @@ export function GameCanvas() {
           <CompetitorCarWash />
           <AmbientTraffic />
 
-          {/* Dynamic Entities & Visual Effects */}
+          {/* Dynamic Entities & Pure WebGL Effects */}
           <VehiclesLayer />
           <WorkersLayer />
           <WashEffects />

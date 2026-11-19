@@ -5,6 +5,7 @@ import {
   getBuildingFacadeTexture,
   getRoadTexture,
 } from '../../graphics/proceduralTextures';
+import { gameSimulation } from '../../engine/simulation';
 import { useGameStore } from '../../store/useGameStore';
 import { getNightFactor, resolveEffectiveTime } from '../LightingAndSky';
 
@@ -166,7 +167,7 @@ export function StreetAndCity() {
   // Dynamically boost streetlamp glow & animate strolling pedestrians
   useFrame((clockState, rawDt) => {
     const state = useGameStore.getState();
-    const t = resolveEffectiveTime(state.timeOfDay, state.settings.timeMode);
+    const t = resolveEffectiveTime(gameSimulation.liveTimeOfDay, state.settings.timeMode);
     const night = getNightFactor(t);
     if (lampBulbMatRef.current) {
       lampBulbMatRef.current.emissiveIntensity = 0.5 + night * 3.0;

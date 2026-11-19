@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Crown, GraduationCap, Play, RotateCcw, Sparkles, Swords, Zap } from 'lucide-react';
+import { Hand, Play, RotateCcw } from 'lucide-react';
 import { getBusinessRank } from '../config/progression';
 import { useGameStore } from '../store/useGameStore';
 import type { GraphicsQuality } from '../types/game';
@@ -27,40 +27,19 @@ export function StartScreen() {
     <div className="start-overlay">
       <motion.div
         className="start-card"
-        initial={{ opacity: 0, y: 18, scale: 0.97 }}
+        initial={{ opacity: 0, y: 16, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.35, ease: 'easeOut' }}
+        transition={{ duration: 0.28, ease: 'easeOut' }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div className="brand-accent-bar" />
-            <span className="pill-tag">3D Tycoon • Рубли ₽</span>
+            <span className="pill-tag">3D • 60 FPS</span>
           </div>
           <h1 className="start-title">AUTOMOIKA</h1>
           <p className="start-subtitle">
-            Построй лучшую 3D-автомойку в городе! Нанимай мастеров, открывай боксы, лови золотые
-            VIP-авто и победи конкурента <strong style={{ color: '#ff6b84' }}>TURBO SHINE</strong>{' '}
-            напротив.
+            Своя 3D-автомойка • Смена 07:00–22:00 • Победи <strong style={{ color: '#ff6b84' }}>TURBO SHINE</strong>
           </p>
-        </div>
-
-        <div className="start-features">
-          <div className="start-feature-chip">
-            <Crown size={13} color="#facc15" />
-            <span>VIP-клиенты и события</span>
-          </div>
-          <div className="start-feature-chip">
-            <Zap size={13} color="#00d4ff" />
-            <span>Турбо-мойка и комбо</span>
-          </div>
-          <div className="start-feature-chip">
-            <Swords size={13} color="#ff6b84" />
-            <span>Битва за долю рынка</span>
-          </div>
-          <div className="start-feature-chip">
-            <GraduationCap size={13} color="#22c55e" />
-            <span>Обучение +5 000 ₽</span>
-          </div>
         </div>
 
         <div className="start-actions">
@@ -70,13 +49,13 @@ export function StartScreen() {
                 id="btn-continue-game"
                 className="btn-primary start-btn-lg"
                 onClick={continueSavedGame}
-                style={{ flexDirection: 'column', gap: 2, height: 56 }}
+                style={{ flexDirection: 'column', gap: 2, height: 54 }}
               >
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
                   <Play size={17} />
-                  Продолжить игру
+                  Продолжить
                 </span>
-                <span style={{ fontSize: 11, fontWeight: 600, opacity: 0.8 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, opacity: 0.82 }}>
                   День {day} • {formatRub(economy.balance)} • {rank.title}
                 </span>
               </button>
@@ -85,8 +64,8 @@ export function StartScreen() {
                 className="btn-secondary start-btn-lg"
                 onClick={startNewGame}
               >
-                <RotateCcw size={16} />
-                Начать новую игру (с обучением)
+                <RotateCcw size={15} />
+                Новая игра
               </button>
             </>
           ) : (
@@ -96,13 +75,13 @@ export function StartScreen() {
               onClick={startNewGame}
             >
               <Play size={18} />
-              Запустить автомойку
+              Играть
             </button>
           )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span className="section-label">Графика 3D</span>
+          <span className="section-label">Графика</span>
           <div className="seg-group">
             {qualityOptions.map((q) => (
               <button
@@ -116,19 +95,9 @@ export function StartScreen() {
           </div>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: 12,
-            color: 'var(--text-secondary)',
-            paddingTop: 6,
-            borderTop: '1px solid var(--border-subtle)',
-          }}
-        >
-          <Sparkles size={14} color="#00d4ff" style={{ flexShrink: 0 }} />
-          <span>Вращайте камеру мышью или пальцем • Нажимайте на машины для «Турбо-помощи»</span>
+        <div className="start-gesture-hint">
+          <Hand size={13} color="#00d4ff" style={{ flexShrink: 0 }} />
+          <span>1 палец — обзор • 2 пальца — зум и поворот • Тап по авто — Турбо</span>
         </div>
       </motion.div>
     </div>

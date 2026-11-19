@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronRight, Gift, GraduationCap, Sparkles, X } from 'lucide-react';
+import { ChevronRight, Gift, GraduationCap, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { TUTORIAL_STEPS } from '../config/progression';
 import { useGameStore } from '../store/useGameStore';
@@ -15,7 +15,7 @@ export function TutorialOverlay() {
   const step = TUTORIAL_STEPS[Math.min(tutorialStep, TUTORIAL_STEPS.length - 1)];
   const isLastStep = tutorialStep >= TUTORIAL_STEPS.length - 1;
 
-  // Highlight the target button in the HUD while the corresponding tutorial step is active
+  // Highlight the target dock button while the corresponding step is active
   useEffect(() => {
     if (!tutorialActive || !step?.highlightId) return;
     const target = document.getElementById(step.highlightId);
@@ -27,74 +27,47 @@ export function TutorialOverlay() {
   }, [tutorialActive, step?.highlightId]);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {tutorialActive && step && (
         <motion.aside
           key={step.id}
-          className={`tutorial-card hud-interactive ${activePanel ? 'panel-open' : ''}`}
-          initial={{ opacity: 0, y: 14, scale: 0.96 }}
+          className={`tutorial-bar hud-interactive ${activePanel ? 'panel-open' : ''}`}
+          initial={{ opacity: 0, y: 10, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 10, scale: 0.96 }}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
+          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
           aria-live="polite"
         >
-          <div className="tutorial-header">
-            <div className="tutorial-badge">
-              {isLastStep ? <Gift size={14} /> : <GraduationCap size={14} />}
-              <span>
-                Обучение • Шаг {tutorialStep + 1} / {TUTORIAL_STEPS.length}
-              </span>
+          <div className="tutorial-bar-left">
+            <span className="tutorial-step-pill">
+              {isLastStep ? <Gift size={12} /> : <GraduationCap size={12} />}
+              {tutorialStep + 1}/{TUTORIAL_STEPS.length}
+            </span>
+            <div className="tutorial-bar-copy">
+              <div className="tutorial-bar-title">{step.title}</div>
+              <div className="tutorial-bar-sub">{step.body}</div>
             </div>
-            <button
-              className="tutorial-skip-btn"
-              onClick={skipTutorial}
-              title="Пропустить обучение"
-            >
-              <span>Пропустить</span>
-              <X size={13} />
-            </button>
           </div>
 
-          <div className="tutorial-progress">
-            {TUTORIAL_STEPS.map((st, idx) => (
-              <span
-                key={st.id}
-                className={`tutorial-pip ${idx <= tutorialStep ? 'done' : ''}`}
-              />
-            ))}
-          </div>
-
-          <h3 className="tutorial-title">{step.title}</h3>
-          <p className="tutorial-body">{step.body}</p>
-
-          <div className="tutorial-hint">
-            <Sparkles size={13} color="#00d4ff" style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>{step.hint}</span>
-          </div>
-
-          <div className="tutorial-footer">
+          <div className="tutorial-bar-actions">
             <button
               id="btn-tutorial-next"
-              className={`btn-primary ${isLastStep ? 'btn-emerald' : ''}`}
-              style={{ width: '100%', height: 38 }}
+              className={`tutorial-next-btn ${isLastStep ? 'reward' : ''}`}
               onClick={advanceTutorial}
             >
-              {isLastStep && !tutorialCompleted ? (
-                <>
-                  <Gift size={15} />
-                  {step.actionLabel}
-                </>
-              ) : isLastStep ? (
-                <>
-                  <ChevronRight size={16} />
-                  Завершить обучение
-                </>
-              ) : (
-                <>
-                  <span>{step.actionLabel}</span>
-                  <ChevronRight size={15} />
-                </>
-              )}
+              <span>
+                {isLastStep && tutorialCompleted ? 'Готово' : step.actionLabel}
+              </span>
+              {!isLastStep && <ChevronRight size={14} />}
+            </button>
+
+            <button
+              className="tutorial-close-btn"
+              onClick={skipTutorial}
+              aria-label="Пропустить обучение"
+              title="Пропустить обучение"
+            >
+              <X size={14} />
             </button>
           </div>
         </motion.aside>

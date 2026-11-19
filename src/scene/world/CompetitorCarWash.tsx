@@ -171,7 +171,6 @@ export function CompetitorCarWash() {
             depthWrite={false}
           />
         </mesh>
-        <pointLight position={[0, 4.2, 0]} color="#FFE8DC" intensity={24} distance={26} decay={1.5} />
         <mesh position={[0, 4.72, 4.2]}>
           <boxGeometry args={[20.7, 0.22, 0.14]} />
           <meshStandardMaterial color="#FF4D4F" emissive="#FF4D4F" emissiveIntensity={2.1} />

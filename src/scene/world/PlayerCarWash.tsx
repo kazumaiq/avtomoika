@@ -279,9 +279,8 @@ export function PlayerCarWash() {
             depthWrite={false}
           />
         </mesh>
-        {/* Interior Wash Bay Studio Floodlights (keeps all 4 bays luminous day and night!) */}
-        <pointLight position={[-6.0, 4.3, 0]} color="#E6F9FF" intensity={26} distance={28} decay={1.5} />
-        <pointLight position={[5.5, 4.3, 0]} color="#E6F9FF" intensity={24} distance={28} decay={1.5} />
+        {/* Single Balanced Studio Floodlight (keeps bays vivid while saving GPU fragment cost on mobile!) */}
+        <pointLight position={[0, 4.4, 0]} color="#E6F9FF" intensity={30} distance={34} decay={1.5} />
         {/* Front Bold Cyan Graphic Edge */}
         <mesh position={[0, 4.78, -4.2]}>
           <boxGeometry args={[24.8, 0.22, 0.14]} />
@@ -493,8 +492,13 @@ export function PlayerCarWash() {
                 </mesh>
               </>
             ) : (
-              /* Locked Expansion Bay Construction Barriers */
-              <group>
+              /* Locked Expansion Bay Construction Barriers — tap in 3D to open Upgrades! */
+              <group
+                onClick={(e) => {
+                  e.stopPropagation();
+                  useGameStore.getState().setActivePanel('upgrades');
+                }}
+              >
                 <mesh position={[0, 0.52, -3.2]} castShadow>
                   <boxGeometry args={[4.4, 0.85, 0.24]} />
                   <meshStandardMaterial color="#FFB800" roughness={0.6} />

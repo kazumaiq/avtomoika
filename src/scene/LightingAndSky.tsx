@@ -2,20 +2,26 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { gameSimulation } from '../engine/simulation';
 import { useGameStore } from '../store/useGameStore';
 
 export function resolveEffectiveTime(timeOfDay: number, mode: string): number {
-  if (mode === 'morning') return 0.28;
-  if (mode === 'day') return 0.46;
-  if (mode === 'sunset') return 0.71;
-  if (mode === 'night') return 0.92;
+  if (mode === 'morning') return 0.31; // 07:26 golden dawn
+  if (mode === 'day') return 0.52; // 12:30 bright sunlit day
+  if (mode === 'sunset') return 0.76; // 18:15 vibrant golden sunset
+  if (mode === 'night') return 0.89; // 21:20 neon evening
   return timeOfDay;
 }
 
 export function getNightFactor(t: number): number {
-  // Returns 0 in bright day, 1 at deep night
-  const sunWave = Math.sin((t - 0.22) * Math.PI * 2);
-  return THREE.MathUtils.clamp((-sunWave + 0.12) * 1.15, 0, 1);
+  // Smoothly fades in streetlamps, headlights & evening glow after 18:30 (t > 0.77)
+  if (t >= 0.77) {
+    return THREE.MathUtils.smoothstep(t, 0.77, 0.89);
+  }
+  if (t < 0.31) {
+    return 1 - THREE.MathUtils.smoothstep(t, 0.25, 0.31);
+  }
+  return 0;
 }
 
 const SKY_VERTEX = /* glsl */ `
@@ -58,30 +64,26 @@ const SKY_FRAGMENT = /* glsl */ `
     vec3 dir = normalize(vWorldPos);
     float h = clamp(dir.y, 0.0, 1.0);
 
-    // Rich 3-stop vibrant graphic sky gradient
     vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.28, h));
     col = mix(col, uTopColor, smoothstep(0.24, 0.86, h));
 
-    // Stylized soft drifting clouds during day & sunset
     if (h > 0.06) {
-      vec2 cloudUv = dir.xz / (h + 0.24) * 1.85 + vec2(uTime * 0.015, uTime * 0.005);
+      vec2 cloudUv = dir.xz / (h + 0.24) * 1.85 + vec2(uTime * 0.014, uTime * 0.004);
       float n1 = noise(cloudUv);
-      float n2 = noise(cloudUv * 2.1 + vec2(4.2, 1.7));
+      float n2 = noise(cloudUv * 2.05 + vec2(4.2, 1.7));
       float cloud = smoothstep(0.56, 0.82, n1 * 0.65 + n2 * 0.35);
-      vec3 cloudCol = mix(vec3(1.0, 0.98, 0.95), uHorizonColor * 1.15, 0.35);
+      vec3 cloudCol = mix(vec3(1.0, 0.98, 0.95), uHorizonColor * 1.12, 0.38);
       float cloudAlpha = cloud * smoothstep(0.06, 0.24, h) * (1.0 - smoothstep(0.7, 0.95, h)) * (1.0 - uNight * 0.72);
-      col = mix(col, cloudCol, cloudAlpha * 0.55);
+      col = mix(col, cloudCol, cloudAlpha * 0.54);
     }
 
-    // Crisp sun / moon disc + vibrant halo
     float sunDot = max(dot(dir, normalize(uSunDir)), 0.0);
     float halo = pow(sunDot, 8.0) * 0.42;
     float disc = smoothstep(0.996, 0.9985, sunDot);
     col += uSunColor * (halo + disc * 1.45);
 
-    // Twinkling stars at twilight/night
     if (uNight > 0.22 && h > 0.1) {
-      vec2 grid = floor(dir.xz / max(0.18, dir.y) * 30.0);
+      vec2 grid = floor(dir.xz / max(0.18, dir.y) * 28.0);
       float hash = hash21(grid);
       if (hash > 0.988) {
         float twinkle = 0.65 + 0.35 * sin(uTime * 3.0 + hash * 60.0);
@@ -101,13 +103,13 @@ export function LightingAndSky() {
   const hemiLightRef = useRef<THREE.HemisphereLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
 
-  // Build crisp procedural PMREM Environment map (offline, zero network!) for glossy car clearcoat & wet reflections!
+  // Offline procedural PMREM Environment for showroom reflections on cars & wet floors
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
     const roomEnv = new RoomEnvironment();
     const envRT = pmrem.fromScene(roomEnv, 0.04);
     scene.environment = envRT.texture;
-    scene.environmentIntensity = 0.72;
+    scene.environmentIntensity = 0.78;
     roomEnv.dispose();
     return () => {
       scene.environment = null;
@@ -121,9 +123,9 @@ export function LightingAndSky() {
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        uTopColor: { value: new THREE.Color('#1A5BB8') },
-        uMidColor: { value: new THREE.Color('#53B3F2') },
-        uHorizonColor: { value: new THREE.Color('#D4F0FF') },
+        uTopColor: { value: new THREE.Color('#1B5EB8') },
+        uMidColor: { value: new THREE.Color('#5BB8F5') },
+        uHorizonColor: { value: new THREE.Color('#FFE0B8') },
         uSunDir: { value: new THREE.Vector3(0.55, 0.72, -0.35) },
         uSunColor: { value: new THREE.Color('#FFF7E0') },
         uNight: { value: 0 },
@@ -143,40 +145,40 @@ export function LightingAndSky() {
   const palette = useMemo(
     () => ({
       morning: {
-        top: new THREE.Color('#1E62B0'),
-        mid: new THREE.Color('#6BB7EB'),
-        horizon: new THREE.Color('#FFE0B2'),
-        sun: new THREE.Color('#FFF0CC'),
-        hemiSky: new THREE.Color('#A8E0FF'),
-        hemiGround: new THREE.Color('#4B4558'),
-        fog: new THREE.Color('#DCE7F0'),
+        top: new THREE.Color('#2364B5'),
+        mid: new THREE.Color('#74BCEE'),
+        horizon: new THREE.Color('#FFD9A8'),
+        sun: new THREE.Color('#FFE9BF'),
+        hemiSky: new THREE.Color('#B5E2FF'),
+        hemiGround: new THREE.Color('#574B5E'),
+        fog: new THREE.Color('#E3E8F0'),
       },
       day: {
         top: new THREE.Color('#155BC0'),
-        mid: new THREE.Color('#48B2F5'),
+        mid: new THREE.Color('#4AB4F7'),
         horizon: new THREE.Color('#D4F0FF'),
         sun: new THREE.Color('#FFF9EB'),
-        hemiSky: new THREE.Color('#BCE8FF'),
-        hemiGround: new THREE.Color('#46506B'),
-        fog: new THREE.Color('#C8E6FA'),
+        hemiSky: new THREE.Color('#C4EAFF'),
+        hemiGround: new THREE.Color('#4A5470'),
+        fog: new THREE.Color('#CBE8FC'),
       },
       sunset: {
-        top: new THREE.Color('#22245E'),
-        mid: new THREE.Color('#E84B78'),
-        horizon: new THREE.Color('#FFB067'),
-        sun: new THREE.Color('#FFD98A'),
-        hemiSky: new THREE.Color('#FFA27B'),
-        hemiGround: new THREE.Color('#2C3B5E'),
-        fog: new THREE.Color('#D47A88'),
+        top: new THREE.Color('#252768'),
+        mid: new THREE.Color('#EA507C'),
+        horizon: new THREE.Color('#FFB164'),
+        sun: new THREE.Color('#FFD27A'),
+        hemiSky: new THREE.Color('#FFA57B'),
+        hemiGround: new THREE.Color('#303E62'),
+        fog: new THREE.Color('#D97E88'),
       },
       night: {
-        top: new THREE.Color('#0B142E'),
-        mid: new THREE.Color('#182B5C'),
-        horizon: new THREE.Color('#2A4175'),
+        top: new THREE.Color('#0C1633'),
+        mid: new THREE.Color('#192F66'),
+        horizon: new THREE.Color('#2D4680'),
         sun: new THREE.Color('#99E2FF'),
-        hemiSky: new THREE.Color('#4B77C2'),
-        hemiGround: new THREE.Color('#1D263E'),
-        fog: new THREE.Color('#1C2B4D'),
+        hemiSky: new THREE.Color('#5685D1'),
+        hemiGround: new THREE.Color('#212C48'),
+        fog: new THREE.Color('#1E3056'),
       },
     }),
     []
@@ -191,30 +193,28 @@ export function LightingAndSky() {
   const tmpFog = useMemo(() => new THREE.Color(), []);
 
   useFrame((clockState) => {
-    const state = useGameStore.getState();
-    const t = resolveEffectiveTime(state.timeOfDay, state.settings.timeMode);
+    const timeMode = useGameStore.getState().settings.timeMode;
+    // Read smooth 60 FPS liveTimeOfDay directly from simulation (zero React re-renders!)
+    const t = resolveEffectiveTime(gameSimulation.liveTimeOfDay, timeMode);
     const night = getNightFactor(t);
 
-    let from = palette.night;
-    let to = palette.morning;
+    // Crisp shift progression: 07:00 Morning (0.29) -> 12:30 Day (0.52) -> 18:15 Sunset (0.76) -> 21:30 Neon Evening (0.90)
+    let from = palette.morning;
+    let to = palette.day;
     let alpha = 0;
 
-    if (t < 0.28) {
-      from = palette.night;
-      to = palette.morning;
-      alpha = THREE.MathUtils.smoothstep(t, 0.14, 0.28);
-    } else if (t < 0.56) {
+    if (t < 0.45) {
       from = palette.morning;
       to = palette.day;
-      alpha = THREE.MathUtils.smoothstep(t, 0.28, 0.45);
+      alpha = THREE.MathUtils.smoothstep(t, 0.30, 0.45);
     } else if (t < 0.76) {
       from = palette.day;
       to = palette.sunset;
-      alpha = THREE.MathUtils.smoothstep(t, 0.56, 0.72);
+      alpha = THREE.MathUtils.smoothstep(t, 0.62, 0.76);
     } else {
       from = palette.sunset;
       to = palette.night;
-      alpha = THREE.MathUtils.smoothstep(t, 0.76, 0.9);
+      alpha = THREE.MathUtils.smoothstep(t, 0.76, 0.89);
     }
 
     tmpTop.copy(from.top).lerp(to.top, alpha);
@@ -225,11 +225,12 @@ export function LightingAndSky() {
     tmpHemiGnd.copy(from.hemiGround).lerp(to.hemiGround, alpha);
     tmpFog.copy(from.fog).lerp(to.fog, alpha);
 
-    // Keep sun well elevated so shadows stay soft and never slice darkly across the road!
-    const sunAngle = (t - 0.22) * Math.PI * 2;
-    const sunY = Math.max(0.42, Math.sin(sunAngle) * 0.78 + 0.25);
-    const sunX = Math.cos(sunAngle) * 0.72;
-    const sunZ = -0.38;
+    // Smooth visible sun arc across the sky from East (07:00) through Noon (13:00) to West (21:00)
+    const shiftProgress = THREE.MathUtils.clamp((t - 7 / 24) / (15 / 24), 0, 1);
+    const arcAngle = shiftProgress * Math.PI;
+    const sunX = Math.cos(arcAngle) * 0.85;
+    const sunY = Math.max(0.45, Math.sin(arcAngle) * 0.82 + 0.25);
+    const sunZ = -0.36;
 
     skyMaterial.uniforms.uTopColor.value.copy(tmpTop);
     skyMaterial.uniforms.uMidColor.value.copy(tmpMid);
@@ -243,57 +244,59 @@ export function LightingAndSky() {
       scene.fog.color.copy(tmpFog);
     }
     scene.background = tmpFog;
-    scene.environmentIntensity = THREE.MathUtils.lerp(0.82, 0.42, night);
+    scene.environmentIntensity = THREE.MathUtils.lerp(0.85, 0.48, night);
 
     if (dirLightRef.current) {
-      dirLightRef.current.position.set(sunX * 42, Math.max(30, sunY * 56), sunZ * 36);
+      dirLightRef.current.position.set(sunX * 42, Math.max(30, sunY * 54), sunZ * 36);
       dirLightRef.current.color.copy(tmpSun);
-      dirLightRef.current.intensity = THREE.MathUtils.lerp(2.65, 1.25, night);
+      dirLightRef.current.intensity = THREE.MathUtils.lerp(2.75, 1.35, night);
     }
 
     if (hemiLightRef.current) {
       hemiLightRef.current.color.copy(tmpHemiSky);
       hemiLightRef.current.groundColor.copy(tmpHemiGnd);
-      hemiLightRef.current.intensity = THREE.MathUtils.lerp(1.55, 1.05, night);
+      hemiLightRef.current.intensity = THREE.MathUtils.lerp(1.65, 1.15, night);
     }
 
     if (rimLightRef.current) {
-      rimLightRef.current.intensity = THREE.MathUtils.lerp(0.85, 1.35, night);
+      rimLightRef.current.intensity = THREE.MathUtils.lerp(0.85, 1.4, night);
     }
   });
 
-  const shadowMapSize = quality === 'high' ? 2048 : quality === 'medium' ? 1024 : 512;
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const shadowMapSize =
+    quality === 'high' ? (isMobile ? 1024 : 2048) : quality === 'medium' ? 1024 : 512;
 
   return (
     <>
-      <fog attach="fog" args={['#C8E6FA', 75, 185]} />
+      <fog attach="fog" args={['#CBE8FC', 76, 185]} />
 
-      {/* Stylized Shader Sky Dome with Drifting Clouds */}
+      {/* Stylized Shader Sky Dome with Drifting Clouds & Evening Stars */}
       <mesh material={skyMaterial} scale={[165, 165, 165]}>
-        <sphereGeometry args={[1, 28, 20]} />
+        <sphereGeometry args={[1, 24, 18]} />
       </mesh>
 
-      {/* Main Key Sunlight with Expanded Shadow Frustum (no hard shadow edge on the street!) */}
+      {/* Main Key Sunlight with Expanded Shadow Frustum */}
       <directionalLight
         ref={dirLightRef}
         position={[26, 44, -18]}
-        intensity={2.4}
+        intensity={2.5}
         castShadow={quality !== 'low'}
         shadow-mapSize-width={shadowMapSize}
         shadow-mapSize-height={shadowMapSize}
         shadow-camera-near={5}
         shadow-camera-far={145}
-        shadow-camera-left={-56}
-        shadow-camera-right={56}
-        shadow-camera-top={56}
-        shadow-camera-bottom={-56}
+        shadow-camera-left={-54}
+        shadow-camera-right={54}
+        shadow-camera-top={54}
+        shadow-camera-bottom={-54}
         shadow-bias={-0.0004}
         shadow-normalBias={0.05}
-        shadow-radius={3}
+        shadow-radius={2}
       />
 
       {/* Rich Atmospheric Bounce Hemisphere */}
-      <hemisphereLight ref={hemiLightRef} args={['#BCE8FF', '#46506B', 1.4]} />
+      <hemisphereLight ref={hemiLightRef} args={['#C4EAFF', '#4A5470', 1.5]} />
 
       {/* Cool Cyan Graphic Rim Light */}
       <directionalLight

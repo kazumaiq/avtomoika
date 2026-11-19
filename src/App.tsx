@@ -5,6 +5,7 @@ import { GameCanvas } from './scene/GameCanvas';
 import { useGameStore } from './store/useGameStore';
 import { BottomDock } from './ui/BottomDock';
 import { SelectionInspector } from './ui/SelectionInspector';
+import { ShiftSummaryModal } from './ui/ShiftSummaryModal';
 import { StartScreen } from './ui/StartScreen';
 import { ToastFeed } from './ui/ToastFeed';
 import { TopHud } from './ui/TopHud';
@@ -64,6 +65,7 @@ export function App() {
 
           <TutorialOverlay />
           <BottomDock />
+          <ShiftSummaryModal />
         </div>
       )}
     </main>

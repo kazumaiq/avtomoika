@@ -15,8 +15,8 @@ interface VehicleModelProps {
 export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
   const rootRef = useRef<THREE.Group>(null);
   const bodyBounceRef = useRef<THREE.Group>(null);
-  const bodyMatRef = useRef<THREE.MeshPhysicalMaterial>(null);
-  const roofMatRef = useRef<THREE.MeshPhysicalMaterial>(null);
+  const bodyMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const roofMatRef = useRef<THREE.MeshStandardMaterial>(null);
   const vipRingRef = useRef<THREE.Mesh>(null);
   const vipStarRef = useRef<THREE.Mesh>(null);
 
@@ -39,12 +39,11 @@ export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
       emissive: '#FF2E4D',
       emissiveIntensity: 1.1,
     });
-    const glass = new THREE.MeshPhysicalMaterial({
-      color: '#10203A',
-      roughness: 0.06,
-      metalness: 0.25,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.05,
+    const glass = new THREE.MeshStandardMaterial({
+      color: '#0F2240',
+      roughness: 0.05,
+      metalness: 0.85,
+      envMapIntensity: 1.5,
     });
     const dirt = new THREE.MeshStandardMaterial({
       color: '#63472F',
@@ -240,17 +239,16 @@ export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
       if (w) w.rotation.x = car.wheelSpin;
     }
 
-    // Ultra-satisfying paint transformation: matte dusty mud -> mirror showroom clearcoat!
+    // Ultra-satisfying paint transformation: matte dusty mud -> showroom mirror gloss!
     const cleanFactor = 1 - car.dirtLevel;
-    const applyClearcoat = (mat: THREE.MeshPhysicalMaterial | null) => {
+    const applyGloss = (mat: THREE.MeshStandardMaterial | null) => {
       if (!mat) return;
-      mat.roughness = THREE.MathUtils.lerp(0.84, 0.1, cleanFactor);
-      mat.metalness = THREE.MathUtils.lerp(0.08, initial.isVip ? 0.62 : 0.45, cleanFactor);
-      mat.clearcoat = THREE.MathUtils.lerp(0.05, 1.0, cleanFactor);
-      mat.clearcoatRoughness = THREE.MathUtils.lerp(0.75, 0.06, cleanFactor);
+      mat.roughness = THREE.MathUtils.lerp(0.86, 0.08, cleanFactor);
+      mat.metalness = THREE.MathUtils.lerp(0.06, initial.isVip ? 0.64 : 0.48, cleanFactor);
+      mat.envMapIntensity = THREE.MathUtils.lerp(0.4, 1.7, cleanFactor);
     };
-    applyClearcoat(bodyMatRef.current);
-    applyClearcoat(roofMatRef.current);
+    applyGloss(bodyMatRef.current);
+    applyGloss(roofMatRef.current);
 
     if (dirtGroupRef.current) {
       dirtGroupRef.current.visible = car.dirtLevel > 0.02;
@@ -273,8 +271,8 @@ export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
         shape.bodyY + shape.bodyH * 0.5 + shape.cabinH + 0.65 + Math.sin(t * 3.5) * 0.1;
     }
 
-    const store = useGameStore.getState();
-    const effTime = resolveEffectiveTime(store.timeOfDay, store.settings.timeMode);
+    const timeMode = useGameStore.getState().settings.timeMode;
+    const effTime = resolveEffectiveTime(gameSimulation.liveTimeOfDay, timeMode);
     const night = getNightFactor(effTime);
     sharedMats.headlight.emissiveIntensity = 0.65 + night * 2.8;
     sharedMats.drl.emissiveIntensity = 1.1 + night * 1.4;
@@ -293,11 +291,11 @@ export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
       onClick={(e) => {
         e.stopPropagation();
         const car = gameSimulation.vehicles.find((v) => v.id === vehicleId);
-        if (isSelected && car && car.owner === 'player' && car.state === 'washing') {
+        // Instant 1-tap Turbo-Boost on any washing player car + select it!
+        if (car && car.owner === 'player' && car.state === 'washing') {
           boostVehicleWash(vehicleId);
-        } else {
-          setSelection({ type: 'vehicle', id: vehicleId });
         }
+        setSelection({ type: 'vehicle', id: vehicleId });
       }}
     >
       {/* Ground Selection Ring */}
@@ -333,23 +331,22 @@ export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
         {/* Main Lower Body */}
         <mesh position={[0, shape.bodyY, 0]} castShadow receiveShadow>
           <boxGeometry args={[width, shape.bodyH, length]} />
-          <meshPhysicalMaterial
+          <meshStandardMaterial
             ref={bodyMatRef}
             color={initial.appearance.primaryColor}
             roughness={0.78}
             metalness={0.14}
-            clearcoat={0.2}
           />
         </mesh>
 
         {/* Sculpted Hood Nose Slope */}
         <mesh position={[0, shape.bodyY + shape.bodyH * 0.24, length * 0.36]} rotation={[0.14, 0, 0]} castShadow>
           <boxGeometry args={[width * 0.94, shape.bodyH * 0.42, length * 0.32]} />
-          <meshPhysicalMaterial
+          <meshStandardMaterial
             color={initial.appearance.primaryColor}
-            roughness={0.32}
-            metalness={0.3}
-            clearcoat={0.7}
+            roughness={0.22}
+            metalness={0.38}
+            envMapIntensity={1.4}
           />
         </mesh>
 
@@ -407,12 +404,11 @@ export function VehicleModel({ vehicleId, initial }: VehicleModelProps) {
         {/* Cabin Roof Core */}
         <mesh position={[0, cabinY, shape.cabinZ]} castShadow receiveShadow>
           <boxGeometry args={[shape.cabinW, shape.cabinH, shape.cabinLen]} />
-          <meshPhysicalMaterial
+          <meshStandardMaterial
             ref={roofMatRef}
             color={initial.appearance.primaryColor}
             roughness={0.35}
-            metalness={0.28}
-            clearcoat={0.75}
+            metalness={0.3}
           />
         </mesh>
 

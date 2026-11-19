@@ -36,6 +36,10 @@ import type {
 import { formatRub } from '../utils/currency';
 import { buildSmoothPath, distanceXZ, lerpAngle, normalizeAngle } from './pathing';
 
+export const SHIFT_START_TIME = 7 / 24; // 07:00 morning
+export const SHIFT_END_TIME = 22 / 24; // 22:00 evening close
+export const SHIFT_DURATION_SEC = 180; // 3 real minutes per work shift at 1x speed
+
 export interface SimulationCallbacks {
   getEconomy: () => EconomyMetrics;
   getUpgrades: () => UpgradeLevels;
@@ -62,7 +66,8 @@ export interface SimulationCallbacks {
     playerMinuteRev: number,
     compMinuteRev: number
   ) => void;
-  onTimeAdvance: (newTimeOfDay: number, dayDelta: number, minuteDelta: number, dtSec: number) => void;
+  onTimeAdvance: (newTimeOfDay: number, minuteDelta: number, dtSec: number) => void;
+  onShiftComplete: () => void;
   onCompetitorUpdate: (patch: Partial<CompetitorState>) => void;
   onCityEventUpdate: (event: ActiveCityEvent | null) => void;
   onToast: (title: string, subtitle: string | undefined, tone: ToastNotification['tone']) => void;
@@ -83,10 +88,17 @@ class GameSimulation {
   public competitorWorkers: WorkerProfile[] = createCompetitorWorkers(2);
   public popups: FloatingPopup[] = [];
   public pendingBursts: SplashBurst[] = [];
+  /** Smooth 60 FPS time of day read directly by 3D lighting without causing React re-renders */
+  public liveTimeOfDay = SHIFT_START_TIME;
 
   private callbacks: SimulationCallbacks | null = null;
   private spawnTimer = 1.0;
-  private eventCooldown = 28;
+  private eventCooldown = 32;
+  private activeEventTimer = 0;
+  private lastSyncedEventSec = -1;
+  private uiSyncAccum = 0;
+  private pendingMinuteDelta = 0;
+  private pendingDtSec = 0;
   private minuteAccumulator = 0;
   private minutePlayerRev = 0;
   private minuteCompRev = 0;
@@ -96,11 +108,20 @@ class GameSimulation {
 
   public bind(callbacks: SimulationCallbacks): void {
     this.callbacks = callbacks;
+    const storeTime = callbacks.getTimeOfDay();
+    this.liveTimeOfDay = Math.min(SHIFT_END_TIME, Math.max(SHIFT_START_TIME, storeTime));
     this.syncWorkerRuntimes();
     if (!this.initialized) {
       this.initialized = true;
       this.seedInitialLiveTraffic();
     }
+  }
+
+  public startNewShift(): void {
+    this.liveTimeOfDay = SHIFT_START_TIME;
+    this.uiSyncAccum = 0;
+    this.pendingMinuteDelta = 0;
+    this.pendingDtSec = 0;
   }
 
   public reset(): void {
@@ -109,8 +130,14 @@ class GameSimulation {
     this.popups = [];
     this.pendingBursts = [];
     this.competitorWorkers = createCompetitorWorkers(2);
+    this.liveTimeOfDay = SHIFT_START_TIME;
     this.spawnTimer = 0.8;
-    this.eventCooldown = 30;
+    this.eventCooldown = 34;
+    this.activeEventTimer = 0;
+    this.lastSyncedEventSec = -1;
+    this.uiSyncAccum = 0;
+    this.pendingMinuteDelta = 0;
+    this.pendingDtSec = 0;
     this.minuteAccumulator = 0;
     this.minutePlayerRev = 0;
     this.minuteCompRev = 0;
@@ -276,7 +303,7 @@ class GameSimulation {
     const car = this.vehicles.find((v) => v.id === vehicleId);
     if (!car || car.owner !== 'player' || car.state !== 'washing') return false;
     const now = performance.now();
-    if (now - car.lastBoostAt < 900) return false;
+    if (now - car.lastBoostAt < 750) return false;
 
     car.lastBoostAt = now;
     car.washProgress = Math.min(0.99, car.washProgress + 0.15);
@@ -289,7 +316,7 @@ class GameSimulation {
       isVip: car.isVip,
     });
     soundEngine.playTurboSplash();
-    this.addPopup(car.x, 2.55, car.z, '⚡ ТУРБО +15%', '#00D4FF');
+    this.addPopup(car.x, 2.45, car.z, '⚡ +15%', '#00D4FF');
     return true;
   }
 
@@ -303,9 +330,9 @@ class GameSimulation {
       text,
       color,
       createdAt: performance.now(),
-      duration: 1850,
+      duration: 1550,
     });
-    if (this.popups.length > 16) {
+    if (this.popups.length > 6) {
       this.popups.shift();
     }
   }
@@ -317,18 +344,46 @@ class GameSimulation {
 
     this.syncWorkerRuntimes();
 
-    // 1. Advance time of day & in-game clock
+    // 1. Advance realistic 07:00 -> 22:00 work shift smoothly at 60 FPS,
+    //    but sync React UI only twice per second (0.5s) to guarantee zero frame drops!
     const timeMode = this.callbacks.getTimeMode();
-    // Full day cycle = 280 real seconds at 1x speed (gives longer sunny/golden windows!)
-    const timeAdvance = timeMode === 'cycle' ? dt / 280 : 0;
-    let nextTime = this.callbacks.getTimeOfDay() + timeAdvance;
-    let dayDelta = 0;
-    if (nextTime >= 1) {
-      nextTime -= 1;
-      dayDelta = 1;
+    if (timeMode === 'cycle') {
+      const shiftSpan = SHIFT_END_TIME - SHIFT_START_TIME;
+      this.liveTimeOfDay += (dt / SHIFT_DURATION_SEC) * shiftSpan;
+
+      if (this.liveTimeOfDay >= SHIFT_END_TIME) {
+        if (this.callbacks.getStarted()) {
+          this.liveTimeOfDay = SHIFT_END_TIME;
+          this.callbacks.onTimeAdvance(
+            this.liveTimeOfDay,
+            this.pendingMinuteDelta + dt / 60,
+            this.pendingDtSec + dt
+          );
+          this.uiSyncAccum = 0;
+          this.pendingMinuteDelta = 0;
+          this.pendingDtSec = 0;
+          this.callbacks.onShiftComplete();
+          return;
+        } else {
+          // On start screen, gracefully loop back to sunny morning
+          this.liveTimeOfDay = SHIFT_START_TIME;
+        }
+      }
     }
-    const minuteDelta = dt / 60;
-    this.callbacks.onTimeAdvance(nextTime, dayDelta, minuteDelta, dt);
+
+    this.uiSyncAccum += dt;
+    this.pendingMinuteDelta += dt / 60;
+    this.pendingDtSec += dt;
+    if (this.uiSyncAccum >= 0.5) {
+      this.callbacks.onTimeAdvance(
+        this.liveTimeOfDay,
+        this.pendingMinuteDelta,
+        this.pendingDtSec
+      );
+      this.uiSyncAccum = 0;
+      this.pendingMinuteDelta = 0;
+      this.pendingDtSec = 0;
+    }
 
     // 2. Dynamic City Events (only while actively playing)
     if (this.callbacks.getStarted()) {
@@ -338,7 +393,7 @@ class GameSimulation {
     // 3. Competitor autonomous evolution & promotions
     this.stepCompetitorAI(dt);
 
-    // 4. Vehicle spawning based on total city demand + advertising + events
+    // 4. Vehicle spawning based on total city demand + time of day + advertising + events
     this.stepSpawner(dt);
 
     // 5. Queue advancement & bay dispatching
@@ -368,12 +423,18 @@ class GameSimulation {
     if (!this.callbacks) return;
     const active = this.callbacks.getActiveEvent();
     if (active) {
-      const rem = active.remainingSec - dt;
-      if (rem <= 0) {
+      this.activeEventTimer -= dt;
+      if (this.activeEventTimer <= 0) {
+        this.activeEventTimer = 0;
+        this.lastSyncedEventSec = -1;
         this.callbacks.onCityEventUpdate(null);
-        this.eventCooldown = 55 + Math.random() * 35;
+        this.eventCooldown = 62 + Math.random() * 36;
       } else {
-        this.callbacks.onCityEventUpdate({ ...active, remainingSec: rem });
+        const sec = Math.ceil(this.activeEventTimer);
+        if (sec !== this.lastSyncedEventSec) {
+          this.lastSyncedEventSec = sec;
+          this.callbacks.onCityEventUpdate({ ...active, remainingSec: sec });
+        }
       }
       return;
     }
@@ -383,15 +444,16 @@ class GameSimulation {
       const pool: CityEventId[] = ['rain_aftermath', 'rush_hour', 'car_blogger', 'vip_convoy'];
       const chosenId = pool[Math.floor(Math.random() * pool.length)];
       const spec = CITY_EVENTS[chosenId];
+      this.activeEventTimer = spec.duration;
+      this.lastSyncedEventSec = Math.ceil(spec.duration);
       this.callbacks.onCityEventUpdate({
         id: chosenId,
         remainingSec: spec.duration,
         totalSec: spec.duration,
       });
       soundEngine.playFanfare();
-      this.callbacks.onToast(spec.title, spec.subtitle, chosenId === 'vip_convoy' ? 'vip' : 'cyan');
+      this.callbacks.onToast(spec.title, undefined, chosenId === 'vip_convoy' ? 'vip' : 'cyan');
 
-      // Immediately dispatch a VIP guest if VIP convoy starts!
       if (chosenId === 'vip_convoy' && this.vehicles.length < 16) {
         this.spawnCustomerVehicle('player', 0.15, true);
         this.callbacks.onEntityListChanged();
@@ -410,16 +472,9 @@ class GameSimulation {
       if (promoActive) {
         promoActive = false;
         promoTimer = 75 + Math.random() * 55;
-      } else if (Math.random() < 0.48) {
+      } else if (Math.random() < 0.45) {
         promoActive = true;
         promoTimer = 34;
-        if (this.callbacks.getStarted()) {
-          this.callbacks.onToast(
-            'TURBO SHINE запустил скидку -18%!',
-            'Включите «Счастливый час» или рекламу, чтобы удержать клиентов.',
-            'coral'
-          );
-        }
       } else {
         promoTimer = 52;
       }
@@ -448,10 +503,15 @@ class GameSimulation {
     const upgrades = this.callbacks.getUpgrades();
     const activeEvent = this.callbacks.getActiveEvent();
 
+    // Feel the rhythm of the day: calm early morning, vibrant midday, lively sunset rush hour!
+    const hour = this.liveTimeOfDay * 24;
+    const timeWave =
+      hour < 9.5 ? 0.9 : hour >= 16.5 && hour <= 19.8 ? 1.22 : hour > 20.5 ? 0.92 : 1.05;
+
     const adSpec = AD_CAMPAIGNS[eco.adCampaign];
     const eventTraffic = activeEvent ? CITY_EVENTS[activeEvent.id].trafficMultiplier : 1.0;
     const happyTraffic = eco.happyHourRemaining > 0 ? 1.35 : 1.0;
-    const baseInterval = 3.9 / (adSpec.trafficMultiplier * eventTraffic * happyTraffic);
+    const baseInterval = 3.85 / (adSpec.trafficMultiplier * eventTraffic * happyTraffic * timeWave);
     const bayBonus = Math.max(0.62, 1 - (upgrades.bays - 1) * 0.12);
     const targetInterval = Math.max(1.55, baseInterval * bayBonus);
 
@@ -508,11 +568,6 @@ class GameSimulation {
       soundEngine.playCarArrival();
       if (isVip) {
         soundEngine.playFanfare();
-        this.callbacks.onToast(
-          '⭐ VIP-клиент на подъезде!',
-          'Обслужите без задержек — тройная оплата и рост рейтинга!',
-          'vip'
-        );
       }
     }
     this.callbacks.onEntityListChanged();

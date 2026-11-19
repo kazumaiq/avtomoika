@@ -1,17 +1,18 @@
 import {
-  Car,
   Crown,
   FastForward,
   Flame,
   Gift,
   Home,
+  Moon,
   Pause,
   Play,
   Sparkles,
   Star,
+  Sun,
+  Sunrise,
+  Sunset,
   Target,
-  TrendingDown,
-  TrendingUp,
   Volume2,
   VolumeX,
   Zap,
@@ -19,7 +20,7 @@ import {
 import { useEffect, useState } from 'react';
 import { soundEngine } from '../audio/soundEngine';
 import { CITY_EVENTS, QUEST_CHAIN } from '../config/progression';
-import { gameSimulation } from '../engine/simulation';
+import { SHIFT_END_TIME, SHIFT_START_TIME, gameSimulation } from '../engine/simulation';
 import { resolveEffectiveTime } from '../scene/LightingAndSky';
 import { useGameStore } from '../store/useGameStore';
 import { formatRub } from '../utils/currency';
@@ -29,6 +30,21 @@ function formatClock(t: number): string {
   const h = Math.floor(totalMinutes / 60);
   const m = Math.floor(totalMinutes % 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function getPhaseMeta(t: number): { label: string; color: string; icon: 'morning' | 'day' | 'sunset' | 'night' } {
+  const hour = t * 24;
+  if (hour < 10.5) return { label: 'Утро', color: '#fcd34d', icon: 'morning' };
+  if (hour < 16.5) return { label: 'День', color: '#38bdf8', icon: 'day' };
+  if (hour < 19.8) return { label: 'Закат', color: '#fb923c', icon: 'sunset' };
+  return { label: 'Вечер', color: '#a5b4fc', icon: 'night' };
+}
+
+function PhaseIcon({ kind, color }: { kind: 'morning' | 'day' | 'sunset' | 'night'; color: string }) {
+  if (kind === 'morning') return <Sunrise size={13} color={color} />;
+  if (kind === 'day') return <Sun size={13} color={color} />;
+  if (kind === 'sunset') return <Sunset size={13} color={color} />;
+  return <Moon size={13} color={color} />;
 }
 
 export function TopHud() {
@@ -50,30 +66,30 @@ export function TopHud() {
   const returnToTitle = useGameStore((s) => s.returnToTitle);
   const claimQuestReward = useGameStore((s) => s.claimQuestReward);
 
-  const [liveStats, setLiveStats] = useState({ queue: 0, washing: 0, share: 50 });
+  const [sharePct, setSharePct] = useState(50);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      const queue = gameSimulation.getQueueCount('player');
-      const washing = gameSimulation.vehicles.filter(
-        (v) => v.owner === 'player' && (v.state === 'washing' || v.state === 'moving_to_bay')
-      ).length;
-      const share = Math.round(gameSimulation.getPlayerAttractionShare() * 100);
-      setLiveStats({ queue, washing, share });
-    }, 320);
+      setSharePct(Math.round(gameSimulation.getPlayerAttractionShare() * 100));
+    }, 650);
     return () => window.clearInterval(id);
   }, []);
 
   const effTime = resolveEffectiveTime(timeOfDay, timeMode);
+  const phase = getPhaseMeta(effTime);
+  const shiftPct = Math.min(
+    100,
+    Math.max(0, Math.round(((effTime - SHIFT_START_TIME) / (SHIFT_END_TIME - SHIFT_START_TIME)) * 100))
+  );
   const net = economy.profitPerMin;
 
-  // Next active quest from QUEST_CHAIN
+  // Next active quest
   const activeQuest = QUEST_CHAIN.find((q) => !claimedQuestIds.includes(q.id)) ?? null;
   const questSnapshot = {
     economy,
     upgrades,
     workers,
-    playerSharePct: liveStats.share,
+    playerSharePct: sharePct,
   };
   const questCurrent = activeQuest ? activeQuest.getCurrent(questSnapshot) : 0;
   const questPct = activeQuest
@@ -83,7 +99,7 @@ export function TopHud() {
   const questProgressText = activeQuest
     ? activeQuest.formatProgress
       ? activeQuest.formatProgress(questCurrent, activeQuest.target)
-      : `${Math.min(questCurrent, activeQuest.target)} / ${activeQuest.target}`
+      : `${Math.min(questCurrent, activeQuest.target)}/${activeQuest.target}`
     : '';
 
   const eventSpec = activeEvent ? CITY_EVENTS[activeEvent.id] : null;
@@ -97,7 +113,7 @@ export function TopHud() {
   return (
     <div className="top-hud-stack">
       <header className="top-hud">
-        {/* Primary Financial & Business Metrics */}
+        {/* Clean Primary Metrics Bar (Balance, Profit/min, Rating, Shift Clock) */}
         <div className="hud-pill-group hud-metrics-bar hud-interactive">
           <div className="hud-metric">
             <div>
@@ -109,13 +125,8 @@ export function TopHud() {
           </div>
 
           <div className="hud-metric">
-            {net >= 0 ? (
-              <TrendingUp size={14} color="#22c55e" className="hide-mobile" />
-            ) : (
-              <TrendingDown size={14} color="#ff3b5c" className="hide-mobile" />
-            )}
             <div>
-              <div className="hud-metric-label">Прибыль/м</div>
+              <div className="hud-metric-label">В мин</div>
               <div className={`hud-metric-val ${net >= 0 ? 'val-positive' : 'val-negative'}`}>
                 {formatRub(net, { signed: true, compact: Math.abs(net) >= 100_000 })}
               </div>
@@ -123,40 +134,35 @@ export function TopHud() {
           </div>
 
           <div className="hud-metric">
-            <Star size={13} color="#ffb800" fill="#ffb800" />
+            <Star size={12} color="#ffb800" fill="#ffb800" />
             <div>
               <div className="hud-metric-label">Рейтинг</div>
-              <div className="hud-metric-val val-amber">{economy.reputation.toFixed(2)}</div>
+              <div className="hud-metric-val val-amber">{economy.reputation.toFixed(1)}</div>
             </div>
           </div>
 
-          <div className="hud-metric">
-            <Car size={14} color="#00d4ff" className="hide-mobile" />
-            <div>
-              <div className="hud-metric-label">Клиенты</div>
-              <div className="hud-metric-val val-cyan">
-                {liveStats.washing}/{liveStats.queue}
+          {/* Always-visible Work Shift Clock (07:00 -> 22:00) so time is felt on iPhone & desktop! */}
+          <div className="hud-metric hud-clock-metric" title={`День ${day} • ${phase.label} (смена 07:00–22:00)`}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 66 }}>
+              <div className="hud-clock-top">
+                <PhaseIcon kind={phase.icon} color={phase.color} />
+                <span className="hud-metric-val" style={{ fontSize: 12.5 }}>
+                  {formatClock(effTime)}
+                </span>
+                <span className="hud-day-tag">Д{day}</span>
               </div>
-            </div>
-          </div>
-
-          <div className="hud-metric hide-mobile">
-            <div>
-              <div className="hud-metric-label">Рынок</div>
-              <div className="hud-metric-val">{liveStats.share}%</div>
+              <div className="shift-mini-track">
+                <span
+                  className="shift-mini-fill"
+                  style={{ width: `${shiftPct}%`, background: phase.color }}
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Time, Speed & System Controls */}
+        {/* Speed & System Controls */}
         <div className="hud-pill-group hud-controls-bar hud-interactive">
-          <div className="hud-metric hide-mobile" style={{ paddingRight: 10 }}>
-            <div>
-              <div className="hud-metric-label">День {day}</div>
-              <div className="hud-metric-val">{formatClock(effTime)}</div>
-            </div>
-          </div>
-
           <button
             id="btn-toggle-pause"
             className={`icon-btn ${paused ? 'active' : ''}`}
@@ -170,7 +176,7 @@ export function TopHud() {
             id="btn-speed-toggle"
             className={`icon-btn ${!paused && simSpeed > 1 ? 'active' : ''}`}
             onClick={cycleSpeed}
-            title="Скорость симуляции (1x / 2x / 3x)"
+            title="Скорость (1x / 2x / 3x)"
           >
             <FastForward size={13} />
             <span>{simSpeed}x</span>
@@ -192,14 +198,14 @@ export function TopHud() {
             id="btn-main-menu"
             className="icon-btn"
             onClick={returnToTitle}
-            title="Главное меню"
+            title="Меню"
           >
             <Home size={14} />
           </button>
         </div>
       </header>
 
-      {/* Secondary Gameplay Strip: Quest Goal Tracker, Combo Streak & Active City Events */}
+      {/* Single Ultra-Clean Sub-Row: Quest Pill + Active Status Chips */}
       <div className="hud-sub-strip">
         {activeQuest ? (
           <button
@@ -212,7 +218,7 @@ export function TopHud() {
             title={activeQuest.description}
           >
             <span className="quest-icon">
-              {questReady ? <Gift size={14} /> : <Target size={14} />}
+              {questReady ? <Gift size={13} /> : <Target size={13} />}
             </span>
             <span className="quest-text">
               <span className="quest-title-row">
@@ -231,24 +237,24 @@ export function TopHud() {
           </button>
         ) : (
           <div className="quest-pill completed hud-interactive">
-            <Crown size={14} color="#facc15" />
-            <span className="quest-title">Все цели выполнены • Империя AUTOMOIKA</span>
+            <Crown size={13} color="#facc15" />
+            <span className="quest-title">Империя AUTOMOIKA</span>
           </div>
         )}
 
         <div className="hud-status-pills">
           {economy.combo >= 2 && (
-            <div className="combo-pill hud-interactive" title="Серия без потерь очереди увеличивает чаевые!">
-              <Flame size={13} color="#fb923c" fill="#fb923c" />
-              <span>Серия ×{economy.combo}</span>
+            <div className="combo-pill hud-interactive" title="Серия без потерь очереди">
+              <Flame size={12} color="#fb923c" fill="#fb923c" />
+              <span>×{economy.combo}</span>
               <span className="combo-bonus">+{comboTipBonus}%</span>
             </div>
           )}
 
           {economy.happyHourRemaining > 0 && (
             <div className="event-pill amber hud-interactive">
-              <Zap size={13} color="#ffb800" fill="#ffb800" />
-              <span>Счастливый час • {Math.ceil(economy.happyHourRemaining)}с</span>
+              <Zap size={12} color="#ffb800" fill="#ffb800" />
+              <span>{Math.ceil(economy.happyHourRemaining)}с</span>
             </div>
           )}
 
@@ -256,9 +262,8 @@ export function TopHud() {
             <div
               className="event-pill hud-interactive"
               style={{ borderColor: eventSpec.accentColor }}
-              title={eventSpec.subtitle}
             >
-              <Sparkles size={13} color={eventSpec.accentColor} />
+              <Sparkles size={12} color={eventSpec.accentColor} />
               <span>{eventSpec.title}</span>
               <span className="event-timer">{Math.ceil(activeEvent.remainingSec)}с</span>
             </div>

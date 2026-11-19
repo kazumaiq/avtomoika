@@ -21,9 +21,9 @@ export function StaffPanel() {
   const setSelection = useGameStore((s) => s.setSelection);
   const setActivePanel = useGameStore((s) => s.setActivePanel);
 
-  // During tutorial step 2 ("Hire a second worker"), open directly on the Hire tab for frictionless UX
+  // During tutorial step 1 ("Hire a second worker"), open directly on the Hire tab for frictionless UX
   const [tab, setTab] = useState<'team' | 'hire'>(
-    tutorialActive && tutorialStep === 2 ? 'hire' : 'team'
+    tutorialActive && tutorialStep === 1 ? 'hire' : 'team'
   );
 
   return (

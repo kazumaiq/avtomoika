@@ -17,7 +17,7 @@ import {
   getUpgradeCost,
   getUtilityDiscount,
 } from '../config/upgrades';
-import { gameSimulation } from '../engine/simulation';
+import { SHIFT_START_TIME, gameSimulation } from '../engine/simulation';
 import {
   clearSavedGame,
   hasSavedGame,
@@ -34,6 +34,7 @@ import type {
   GameSettings,
   HireCandidate,
   SelectionTarget,
+  ShiftSummary,
   ToastNotification,
   UpgradeKey,
   UpgradeLevels,
@@ -48,7 +49,7 @@ interface GameStoreState {
   paused: boolean;
   simSpeed: 1 | 2 | 3;
   day: number;
-  /** 0..1 where 0.27=morning, 0.44=bright sunlit day, 0.72=golden sunset, 0.93=neon night */
+  /** 0..1 where 7/24 (0.2917) = 07:00 morning start, 22/24 (0.9167) = 22:00 shift close */
   timeOfDay: number;
   elapsedMinutes: number;
   activePanel: ActivePanel;
@@ -65,7 +66,8 @@ interface GameStoreState {
   competitor: CompetitorState;
   settings: GameSettings;
 
-  // Progression, Events, Tutorial & Toasts
+  // Progression, Shifts, Events, Tutorial & Toasts
+  shiftSummary: ShiftSummary | null;
   activeEvent: ActiveCityEvent | null;
   claimedQuestIds: string[];
   tutorialActive: boolean;
@@ -76,6 +78,7 @@ interface GameStoreState {
   // Actions
   startNewGame: () => void;
   continueSavedGame: () => void;
+  startNextShift: () => void;
   returnToTitle: () => void;
   togglePause: () => void;
   setSimSpeed: (speed: 1 | 2 | 3) => void;
@@ -139,6 +142,7 @@ function createInitialEconomy(): EconomyMetrics {
     combo: 0,
     bestCombo: 0,
     dailyRevenue: 0,
+    dailyExpenses: 0,
     dailyCars: 0,
     happyHourRemaining: 0,
     happyHourCooldown: 0,
@@ -177,10 +181,8 @@ function createInitialCompetitor(): CompetitorState {
 
 function detectDefaultQuality(): GameSettings['quality'] {
   if (typeof window === 'undefined') return 'high';
-  const isSmall = window.innerWidth < 768;
-  const cores = navigator.hardwareConcurrency ?? 4;
-  if (isSmall || cores <= 4) return 'medium';
-  return 'high';
+  const cores = navigator.hardwareConcurrency ?? 6;
+  return cores <= 2 ? 'medium' : 'high';
 }
 
 function createInitialSettings(): GameSettings {
@@ -217,12 +219,11 @@ export const useGameStore = create<GameStoreState>((set, get) => {
   ) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const toast: ToastNotification = { id, title, subtitle, tone, createdAt: Date.now() };
-    set((s) => ({
-      toasts: [...s.toasts.slice(-2), toast],
-    }));
+    // Never stack notifications: show at most 1 compact pill at a time for 2.6 seconds
+    set({ toasts: [toast] });
     window.setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
-    }, 4600);
+    }, 2600);
   };
 
   const bindSim = () => {
@@ -265,13 +266,8 @@ export const useGameStore = create<GameStoreState>((set, get) => {
                 quality = +(quality + 0.08).toFixed(2);
                 const rt = gameSimulation.workerRuntimes.get(w.id);
                 if (rt) {
-                  gameSimulation.addPopup(rt.x, 2.5, rt.z, `LVL ${level}!`, '#00D4FF');
+                  gameSimulation.addPopup(rt.x, 2.4, rt.z, `LVL ${level}!`, '#00D4FF');
                 }
-                pushToastInternal(
-                  `${w.name} получил уровень ${level}!`,
-                  `Скорость ${speed.toFixed(2)}x • Качество ${quality.toFixed(2)}x`,
-                  'cyan'
-                );
               }
 
               return {
@@ -304,7 +300,6 @@ export const useGameStore = create<GameStoreState>((set, get) => {
       },
 
       onPlayerCarLost: (repDelta) => {
-        const hadCombo = get().economy.combo >= 3;
         set((state) => ({
           economy: {
             ...state.economy,
@@ -316,13 +311,6 @@ export const useGameStore = create<GameStoreState>((set, get) => {
             ),
           },
         }));
-        if (hadCombo && get().started) {
-          pushToastInternal(
-            'Клиент не дождался очереди!',
-            'Серия комбо сброшена. Откройте новый бокс или улучшите кофейню.',
-            'coral'
-          );
-        }
       },
 
       onCompetitorWashComplete: (payment) => {
@@ -367,6 +355,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
               ...state.economy,
               balance: nextBalance,
               totalExpenses: state.economy.totalExpenses + totalCycleCost,
+              dailyExpenses: (state.economy.dailyExpenses ?? 0) + totalCycleCost,
               incomePerMin: smoothedIncome,
               expensesPerMin: estExpPerMin,
               profitPerMin: smoothedIncome - estExpPerMin,
@@ -380,28 +369,48 @@ export const useGameStore = create<GameStoreState>((set, get) => {
         });
       },
 
-      onTimeAdvance: (newTimeOfDay, dayDelta, minuteDelta, dtSec) => {
-        const prevState = get();
-        if (dayDelta > 0 && prevState.started) {
-          pushToastInternal(
-            `День ${prevState.day} завершён!`,
-            `Помыто ${prevState.economy.dailyCars} авто • Выручка ${formatRub(prevState.economy.dailyRevenue)}`,
-            'emerald'
-          );
-        }
+      // Called only at 2Hz (every 0.5s), and avoids mutating state.economy when timers are idle!
+      onTimeAdvance: (newTimeOfDay, minuteDelta, dtSec) => {
+        set((state) => {
+          const hasTimers =
+            state.economy.happyHourRemaining > 0 || state.economy.happyHourCooldown > 0;
+          if (!hasTimers) {
+            return {
+              timeOfDay: newTimeOfDay,
+              elapsedMinutes: state.elapsedMinutes + minuteDelta,
+            };
+          }
+          return {
+            timeOfDay: newTimeOfDay,
+            elapsedMinutes: state.elapsedMinutes + minuteDelta,
+            economy: {
+              ...state.economy,
+              happyHourRemaining: Math.max(0, state.economy.happyHourRemaining - dtSec),
+              happyHourCooldown: Math.max(0, state.economy.happyHourCooldown - dtSec),
+            },
+          };
+        });
+      },
 
-        set((state) => ({
-          timeOfDay: newTimeOfDay,
-          day: state.day + dayDelta,
-          elapsedMinutes: state.elapsedMinutes + minuteDelta,
-          economy: {
-            ...state.economy,
-            dailyRevenue: dayDelta > 0 ? 0 : state.economy.dailyRevenue,
-            dailyCars: dayDelta > 0 ? 0 : state.economy.dailyCars,
-            happyHourRemaining: Math.max(0, state.economy.happyHourRemaining - dtSec),
-            happyHourCooldown: Math.max(0, state.economy.happyHourCooldown - dtSec),
+      onShiftComplete: () => {
+        const s = get();
+        soundEngine.playFanfare();
+        const rev = s.economy.dailyRevenue;
+        const exp = s.economy.dailyExpenses ?? 0;
+        set({
+          paused: true,
+          activePanel: null,
+          selection: null,
+          shiftSummary: {
+            day: s.day,
+            carsWashed: s.economy.dailyCars,
+            revenue: rev,
+            expenses: exp,
+            profit: rev - exp,
+            bestCombo: s.economy.bestCombo,
           },
-        }));
+        });
+        get().saveNow();
       },
 
       onCompetitorUpdate: (patch) => {
@@ -424,6 +433,13 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     });
   };
 
+  const initialTime =
+    saved?.timeOfDay !== undefined &&
+    saved.timeOfDay >= SHIFT_START_TIME &&
+    saved.timeOfDay < 22 / 24
+      ? saved.timeOfDay
+      : SHIFT_START_TIME;
+
   return {
     started: false,
     hasSave: hasSavedGame(),
@@ -431,8 +447,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     paused: false,
     simSpeed: 1,
     day: saved?.day ?? 1,
-    // Start in bright crisp sunlit morning/daylight so 3D looks vivid and inviting!
-    timeOfDay: saved?.timeOfDay ?? 0.43,
+    timeOfDay: initialTime,
     elapsedMinutes: saved?.elapsedMinutes ?? 0,
     activePanel: null,
     cameraPreset: 'overview',
@@ -441,13 +456,16 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     followSelected: false,
     entityVersion: 0,
 
-    economy: saved?.economy ?? createInitialEconomy(),
+    economy: saved?.economy
+      ? { ...createInitialEconomy(), ...saved.economy }
+      : createInitialEconomy(),
     upgrades: saved?.upgrades ?? createInitialUpgrades(),
     workers: saved?.workers ?? [createStarterWorker()],
     candidates: generateHireCandidates(4, saved?.economy.reputation ?? 3.55),
     competitor: saved?.competitor ?? createInitialCompetitor(),
     settings: saved?.settings ?? createInitialSettings(),
 
+    shiftSummary: null,
     activeEvent: null,
     claimedQuestIds: saved?.claimedQuestIds ?? [],
     tutorialActive: false,
@@ -471,12 +489,13 @@ export const useGameStore = create<GameStoreState>((set, get) => {
         paused: false,
         simSpeed: 1,
         day: 1,
-        timeOfDay: 0.43,
+        timeOfDay: SHIFT_START_TIME,
         elapsedMinutes: 0,
         activePanel: null,
         cameraPreset: 'overview',
         selection: null,
         followSelected: false,
+        shiftSummary: null,
         economy: freshEco,
         upgrades: freshUpgrades,
         workers: freshWorkers,
@@ -504,13 +523,18 @@ export const useGameStore = create<GameStoreState>((set, get) => {
           data.settings.musicVolume,
           data.settings.muted
         );
+        const restoredTime =
+          data.timeOfDay >= SHIFT_START_TIME && data.timeOfDay < 22 / 24
+            ? data.timeOfDay
+            : SHIFT_START_TIME;
         set({
           started: true,
           hasSave: true,
           lastSavedAt: data.savedAt,
           paused: false,
+          shiftSummary: null,
           day: data.day,
-          timeOfDay: data.timeOfDay,
+          timeOfDay: restoredTime,
           elapsedMinutes: data.elapsedMinutes,
           economy: {
             ...createInitialEconomy(),
@@ -528,16 +552,41 @@ export const useGameStore = create<GameStoreState>((set, get) => {
           activePanel: null,
         });
       } else {
-        set({ started: true, paused: false });
+        set({ started: true, paused: false, shiftSummary: null });
       }
       bindSim();
       gameSimulation.syncWorkerRuntimes();
     },
 
+    startNextShift: () => {
+      soundEngine.unlock();
+      soundEngine.playClick();
+      gameSimulation.startNewShift();
+      set((state) => ({
+        day: state.day + 1,
+        timeOfDay: SHIFT_START_TIME,
+        paused: false,
+        shiftSummary: null,
+        economy: {
+          ...state.economy,
+          dailyRevenue: 0,
+          dailyExpenses: 0,
+          dailyCars: 0,
+        },
+      }));
+      get().saveNow();
+    },
+
     returnToTitle: () => {
       soundEngine.playClick();
       get().saveNow();
-      set({ started: false, activePanel: null, selection: null, followSelected: false });
+      set({
+        started: false,
+        activePanel: null,
+        selection: null,
+        followSelected: false,
+        shiftSummary: null,
+      });
     },
 
     togglePause: () => {
@@ -579,7 +628,14 @@ export const useGameStore = create<GameStoreState>((set, get) => {
 
     boostVehicleWash: (vehicleId) => {
       soundEngine.unlock();
-      return gameSimulation.boostVehicleWash(vehicleId);
+      const ok = gameSimulation.boostVehicleWash(vehicleId);
+      if (ok) {
+        const s = get();
+        if (s.tutorialActive && s.tutorialStep === 0) {
+          set({ tutorialStep: 1 });
+        }
+      }
+      return ok;
     },
 
     activateHappyHour: () => {
@@ -596,11 +652,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
           happyHourCooldown: 75,
         },
       }));
-      pushToastInternal(
-        '⚡ Счастливый час активен (30 сек)!',
-        'Скидка -15% привлекает поток, а боксы работают на +25% быстрее!',
-        'amber'
-      );
+      pushToastInternal('⚡ Счастливый час: 30 сек (-15% цена, +25% скорость)', undefined, 'amber');
       return true;
     },
 
@@ -625,13 +677,10 @@ export const useGameStore = create<GameStoreState>((set, get) => {
           ...state.economy,
           balance: state.economy.balance + def.reward,
           totalRevenue: state.economy.totalRevenue + def.reward,
+          dailyRevenue: state.economy.dailyRevenue + def.reward,
         },
       }));
-      pushToastInternal(
-        `🎯 Цель выполнена: ${def.title}!`,
-        `Награда ${formatRub(def.reward, { signed: true })} зачислена на счёт!`,
-        'emerald'
-      );
+      pushToastInternal(`🎯 ${def.title}: ${formatRub(def.reward, { signed: true })}`, undefined, 'emerald');
       get().saveNow();
       return true;
     },
@@ -656,11 +705,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
             : state.economy,
         }));
         if (giveBonus) {
-          pushToastInternal(
-            '🎓 Обучение пройдено!',
-            `Стартовый бонус ${formatRub(TUTORIAL_BONUS, { signed: true })} уже на балансе!`,
-            'emerald'
-          );
+          pushToastInternal(`🎓 Бонус ${formatRub(TUTORIAL_BONUS, { signed: true })}`, undefined, 'emerald');
         }
         get().saveNow();
       } else {
@@ -740,12 +785,12 @@ export const useGameStore = create<GameStoreState>((set, get) => {
         state.economy.adCampaign
       );
 
-      // Auto-advance tutorial step 3 when player buys an upgrade!
-      const autoAdvance = state.tutorialActive && state.tutorialStep === 3;
+      // Auto-advance tutorial step 2 when player buys an upgrade!
+      const autoAdvance = state.tutorialActive && state.tutorialStep === 2;
 
       set({
         upgrades: nextUpgrades,
-        tutorialStep: autoAdvance ? 4 : state.tutorialStep,
+        tutorialStep: autoAdvance ? 3 : state.tutorialStep,
         economy: {
           ...state.economy,
           balance: state.economy.balance - cost,
@@ -798,12 +843,12 @@ export const useGameStore = create<GameStoreState>((set, get) => {
         state.economy.adCampaign
       );
 
-      // Auto-advance tutorial step 2 when player hires a worker!
-      const autoAdvance = state.tutorialActive && state.tutorialStep === 2;
+      // Auto-advance tutorial step 1 when player hires a worker!
+      const autoAdvance = state.tutorialActive && state.tutorialStep === 1;
 
       set({
         workers: nextWorkers,
-        tutorialStep: autoAdvance ? 3 : state.tutorialStep,
+        tutorialStep: autoAdvance ? 2 : state.tutorialStep,
         candidates:
           nextCandidates.length > 0
             ? nextCandidates
@@ -877,7 +922,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
 
       const rt = gameSimulation.workerRuntimes.get(workerId);
       if (rt) {
-        gameSimulation.addPopup(rt.x, 2.5, rt.z, `ОБУЧЕН LVL ${worker.level + 1}`, '#00D4FF');
+        gameSimulation.addPopup(rt.x, 2.4, rt.z, `LVL ${worker.level + 1}`, '#00D4FF');
       }
 
       set({
@@ -916,7 +961,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
 
       const rt = gameSimulation.workerRuntimes.get(workerId);
       if (rt) {
-        gameSimulation.addPopup(rt.x, 2.5, rt.z, '+МОРАЛЬ!', '#FFB800');
+        gameSimulation.addPopup(rt.x, 2.4, rt.z, '+МОРАЛЬ', '#FFB800');
       }
 
       set({
