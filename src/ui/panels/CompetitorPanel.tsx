@@ -17,12 +17,12 @@ export function CompetitorPanel() {
   const compShare = 100 - playerShare;
 
   const compEffectivePrice = competitor.promoActive
-    ? Math.round(competitor.price * 0.82)
+    ? Math.round((competitor.price * 0.78) / 10) * 10
     : competitor.price;
 
   const playerEffectivePrice =
     economy.happyHourRemaining > 0
-      ? Math.round(economy.washPrice * 0.85)
+      ? Math.round((economy.washPrice * 0.85) / 10) * 10
       : economy.washPrice;
 
   const happyReady =
@@ -81,18 +81,20 @@ export function CompetitorPanel() {
 
   // Dynamic strategic insight
   let tip =
-    'Отличный баланс! Расширяйте боксы и нанимайте мастеров, чтобы перехватить основной поток проспекта.';
+    'TURBO SHINE следит за вашими ценами и улучшается в ответ. Улучшайте пену, воск и боксы, чтобы держать отрыв.';
   if (competitor.promoActive) {
     tip =
-      'TURBO SHINE запустил скидку -18%! Запустите «Счастливый час» или рекламу, чтобы перехватить клиентов.';
+      'TURBO SHINE ударил скидкой -22% и рекламой! Ответьте «Счастливым часом» или снизьте чек, иначе потеряете поток.';
   } else if (
-    playerEffectivePrice > compEffectivePrice + 250 &&
-    playerQuality < competitor.quality + 0.6
+    playerEffectivePrice > compEffectivePrice + 200 &&
+    playerQuality < competitor.quality + 0.55
   ) {
     tip =
-      'Ваша цена ощутимо выше конкурента при схожем качестве. Улучшите пену и воск или слегка снизьте цену.';
+      'Ваша цена слишком высока относительно TURBO SHINE — клиенты уезжают к нему! Снизьте цену или прокачайте качество.';
   } else if (upgrades.bays < competitor.bays) {
-    tip = `У конкурента ${competitor.bays} бокса, а у вас ${upgrades.bays}. Откройте новый бокс во вкладке «Улучшения»!`;
+    tip = `У TURBO SHINE уже ${competitor.bays} бокса против ваших ${upgrades.bays}. Копите на расширение боксов!`;
+  } else if (playerQuality < competitor.quality) {
+    tip = `Качество конкурента выше (${competitor.quality.toFixed(1)}★). Улучшите активную пену и сушку с воском.`;
   }
 
   return (
@@ -119,11 +121,11 @@ export function CompetitorPanel() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertTriangle size={16} color="#ff6b84" />
               <span className="card-title" style={{ color: '#ffb3c0' }}>
-                Конкурент запустил акцию -18%!
+                Ценовая война: TURBO SHINE -22%!
               </span>
             </div>
             <span className="card-sub">
-              Напротив горит баннер скидки — часть трафика временно уходит в TURBO SHINE.
+              Конкурент сбил цену и запустил рекламный блиц — перехватите клиентов «Счастливым часом».
             </span>
           </div>
         )}

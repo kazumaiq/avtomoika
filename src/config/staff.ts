@@ -74,13 +74,13 @@ export function createStarterWorker(): WorkerProfile {
       hatColor: '#00D4FF',
       hasGlasses: false,
     },
-    speed: 1.08,
-    quality: 1.05,
-    salaryPerMin: 600,
+    speed: 1.02,
+    quality: 1.0,
+    salaryPerMin: 750,
     morale: 1.0,
     level: 1,
     xp: 0,
-    xpToNext: 100,
+    xpToNext: 120,
     assignedBay: -1,
     carsWashed: 0,
   };
@@ -94,11 +94,11 @@ export function createCompetitorWorkers(count: number): WorkerProfile[] {
     name: names[idx] ?? `Мойщик #${idx + 1}`,
     roleTitle: 'Turbo Shine Crew',
     appearance: createAppearance('competitor', idx * 7 + 1),
-    speed: 1.0 + idx * 0.08,
-    quality: 1.0 + idx * 0.06,
-    salaryPerMin: 680,
+    speed: 1.16 + idx * 0.09,
+    quality: 1.15 + idx * 0.08,
+    salaryPerMin: 850,
     morale: 1.0,
-    level: 2,
+    level: 2 + Math.min(2, idx),
     xp: 0,
     xpToNext: 150,
     assignedBay: idx,
@@ -119,12 +119,12 @@ export function generateHireCandidates(count = 4, reputation = 3.5): HireCandida
     }
     used.add(name);
 
-    const tierRoll = Math.random() + Math.max(0, (reputation - 3.0) * 0.15);
-    const level = tierRoll > 1.05 ? 3 : tierRoll > 0.65 ? 2 : 1;
-    const speed = +(0.88 + level * 0.14 + Math.random() * 0.22).toFixed(2);
-    const quality = +(0.88 + level * 0.12 + Math.random() * 0.24).toFixed(2);
-    const salaryPerMin = Math.round((450 + (speed + quality) * 200 + level * 75) / 50) * 50;
-    const hireCost = Math.round((4800 + level * 3500 + (speed + quality) * 2000) / 500) * 500;
+    const tierRoll = Math.random() + Math.max(0, (reputation - 3.2) * 0.14);
+    const level = tierRoll > 1.08 ? 3 : tierRoll > 0.68 ? 2 : 1;
+    const speed = +(0.86 + level * 0.12 + Math.random() * 0.18).toFixed(2);
+    const quality = +(0.86 + level * 0.11 + Math.random() * 0.18).toFixed(2);
+    const salaryPerMin = Math.round((680 + (speed + quality) * 290 + level * 140) / 50) * 50;
+    const hireCost = Math.round((7500 + level * 5500 + (speed + quality) * 3200) / 500) * 500;
 
     nextWorkerCounter += 1;
     result.push({
@@ -144,9 +144,9 @@ export function generateHireCandidates(count = 4, reputation = 3.5): HireCandida
 }
 
 export function getTrainingCost(worker: WorkerProfile): number {
-  return Math.round((4500 * Math.pow(1.42, worker.level - 1)) / 500) * 500;
+  return Math.round((8500 * Math.pow(1.68, worker.level - 1)) / 500) * 500;
 }
 
 export function getRaiseAmount(worker: WorkerProfile): number {
-  return Math.max(100, Math.round((worker.salaryPerMin * 0.18) / 50) * 50);
+  return Math.max(150, Math.round((worker.salaryPerMin * 0.2) / 50) * 50);
 }

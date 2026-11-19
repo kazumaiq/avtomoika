@@ -1,14 +1,14 @@
 import type { AdCampaignId, UpgradeDefinition, UpgradeKey, UpgradeLevels } from '../types/game';
 import { formatRub } from '../utils/currency';
 
-export const WASH_PRICE_MIN = 600;
-export const WASH_PRICE_MAX = 3000;
+export const WASH_PRICE_MIN = 500;
+export const WASH_PRICE_MAX = 2200;
 export const WASH_PRICE_STEP = 50;
-export const WASH_PRICE_DEFAULT = 1000;
-export const BAY_UTILITY_PER_MIN = 320;
-export const WASH_UTILITY_COST = 120;
-export const WAX_BONUS_PER_LEVEL = 160;
-export const LOUNGE_TIP_PER_LEVEL = 110;
+export const WASH_PRICE_DEFAULT = 850;
+export const BAY_UTILITY_PER_MIN = 1_100;
+export const WASH_UTILITY_COST = 190;
+export const WAX_BONUS_PER_LEVEL = 75;
+export const LOUNGE_TIP_PER_LEVEL = 55;
 
 export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
   {
@@ -17,8 +17,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Открывает новые крытые боксы с оборудованием',
     category: 'expansion',
     maxLevel: 4,
-    baseCost: 28_000,
-    costMultiplier: 2.15,
+    baseCost: 48_000,
+    costMultiplier: 2.85,
     effectLabel: (lv) => `${lv} из 4 боксов`,
     nextEffectLabel: (next) => `Открыть Бокс #${next}`,
   },
@@ -28,21 +28,21 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Мощные турбофорсунки ускоряют смыв грязи',
     category: 'equipment',
     maxLevel: 5,
-    baseCost: 12_500,
-    costMultiplier: 1.78,
-    effectLabel: (lv) => `+${(lv - 1) * 18}% к скорости мойки`,
-    nextEffectLabel: (next) => `+${(next - 1) * 18}% к скорости мойки`,
+    baseCost: 18_000,
+    costMultiplier: 2.25,
+    effectLabel: (lv) => `+${(lv - 1) * 14}% к скорости мойки`,
+    nextEffectLabel: (next) => `+${(next - 1) * 14}% к скорости мойки`,
   },
   {
     key: 'foamSystem',
     title: 'Активная нано-пена',
-    subtitle: 'Густая цветная пена повышает качество и чаевые',
+    subtitle: 'Густая цветная пена повышает качество и чек',
     category: 'equipment',
     maxLevel: 5,
-    baseCost: 14_500,
-    costMultiplier: 1.82,
-    effectLabel: (lv) => `+${(lv - 1) * 14}% качество и чаевые`,
-    nextEffectLabel: (next) => `+${(next - 1) * 14}% качество и чаевые`,
+    baseCost: 22_000,
+    costMultiplier: 2.3,
+    effectLabel: (lv) => `+${(lv - 1) * 6}% к чеку и качество`,
+    nextEffectLabel: (next) => `+${(next - 1) * 6}% к чеку и качество`,
   },
   {
     key: 'dryerWax',
@@ -50,12 +50,12 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Арки обдува и воск придают зеркальный блеск',
     category: 'equipment',
     maxLevel: 5,
-    baseCost: 17_500,
-    costMultiplier: 1.85,
+    baseCost: 28_000,
+    costMultiplier: 2.35,
     effectLabel: (lv) =>
-      `-${(lv - 1) * 12}% сушка, +${formatRub((lv - 1) * WAX_BONUS_PER_LEVEL)} бонус`,
+      `+${(lv - 1) * 8}% сушка, +${formatRub((lv - 1) * WAX_BONUS_PER_LEVEL)} бонус`,
     nextEffectLabel: (next) =>
-      `-${(next - 1) * 12}% сушка, +${formatRub((next - 1) * WAX_BONUS_PER_LEVEL)} бонус`,
+      `+${(next - 1) * 8}% сушка, +${formatRub((next - 1) * WAX_BONUS_PER_LEVEL)} бонус`,
   },
   {
     key: 'vipLounge',
@@ -63,21 +63,21 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Комфорт и кофе удерживают очередь и растят рейтинг',
     category: 'facility',
     maxLevel: 4,
-    baseCost: 16_000,
-    costMultiplier: 1.9,
-    effectLabel: (lv) => `+${(lv - 1) * 28}% терпение, +${((lv - 1) * 0.25).toFixed(2)}★`,
-    nextEffectLabel: (next) => `+${(next - 1) * 28}% терпение, +${((next - 1) * 0.25).toFixed(2)}★`,
+    baseCost: 25_000,
+    costMultiplier: 2.4,
+    effectLabel: (lv) => `+${(lv - 1) * 24}% терпение, +${((lv - 1) * 0.25).toFixed(2)}★`,
+    nextEffectLabel: (next) => `+${(next - 1) * 24}% терпение, +${((next - 1) * 0.25).toFixed(2)}★`,
   },
   {
     key: 'ecoSolar',
     title: 'Рециркуляция и солнечные панели',
-    subtitle: 'Снижает счета за воду и электричество на территории',
+    subtitle: 'Снижает аренду, воду и электричество в боксах',
     category: 'facility',
     maxLevel: 4,
-    baseCost: 19_500,
-    costMultiplier: 1.85,
-    effectLabel: (lv) => `-${(lv - 1) * 18}% коммунальные расходы`,
-    nextEffectLabel: (next) => `-${(next - 1) * 18}% коммунальные расходы`,
+    baseCost: 26_000,
+    costMultiplier: 2.35,
+    effectLabel: (lv) => `-${(lv - 1) * 18}% расходы на боксы и воду`,
+    nextEffectLabel: (next) => `-${(next - 1) * 18}% расходы на боксы и воду`,
   },
   {
     key: 'queueLot',
@@ -85,8 +85,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Больше мест ожидания на въезде и подсветка полос',
     category: 'expansion',
     maxLevel: 3,
-    baseCost: 21_000,
-    costMultiplier: 2.0,
+    baseCost: 32_000,
+    costMultiplier: 2.6,
     effectLabel: (lv) => `До ${getMaxQueueCapacity(lv)} машин в очереди`,
     nextEffectLabel: (next) => `До ${getMaxQueueCapacity(next)} машин в очереди`,
   },
@@ -113,14 +113,20 @@ export function getPlayerQualityScore(upgrades: UpgradeLevels): number {
   return Math.min(5.0, +(base + foamBonus + waxBonus + loungeBonus).toFixed(2));
 }
 
+/** Fair market wash price clients gladly pay for a given quality & reputation */
+export function getFairWashPrice(quality: number, reputation: number): number {
+  const raw = 580 + quality * 245 + Math.max(0, reputation - 3.0) * 165;
+  return Math.round(raw / 50) * 50;
+}
+
 export function getEquipmentSpeedMultiplier(upgrades: UpgradeLevels): number {
-  const washer = 1 + (upgrades.pressureWasher - 1) * 0.18;
-  const dryer = 1 + (upgrades.dryerWax - 1) * 0.1;
+  const washer = 1 + (upgrades.pressureWasher - 1) * 0.14;
+  const dryer = 1 + (upgrades.dryerWax - 1) * 0.08;
   return washer * dryer;
 }
 
 export function getUtilityDiscount(ecoSolarLevel: number): number {
-  return Math.max(0.35, 1 - (ecoSolarLevel - 1) * 0.18);
+  return Math.max(0.42, 1 - (ecoSolarLevel - 1) * 0.18);
 }
 
 export interface AdCampaignSpec {
@@ -144,25 +150,25 @@ export const AD_CAMPAIGNS: Record<AdCampaignId, AdCampaignSpec> = {
   flyers: {
     id: 'flyers',
     title: 'Листовки на районе',
-    description: '+18% поток машин и заметность среди соседей',
-    costPerMin: 700,
-    demandBoost: 0.55,
-    trafficMultiplier: 1.18,
+    description: '+16% поток машин и заметность среди соседей',
+    costPerMin: 1_500,
+    demandBoost: 0.48,
+    trafficMultiplier: 1.16,
   },
   billboard: {
     id: 'billboard',
     title: 'Неоновый билборд',
-    description: 'Зажигает крышный билборд! +36% поток клиентов',
-    costPerMin: 1_750,
-    demandBoost: 1.2,
-    trafficMultiplier: 1.36,
+    description: 'Зажигает крышный билборд! +32% поток клиентов',
+    costPerMin: 3_600,
+    demandBoost: 1.05,
+    trafficMultiplier: 1.32,
   },
   radio: {
     id: 'radio',
     title: 'Городское радио и соцсети',
-    description: 'Максимальный охват города, +58% поток и больше VIP',
-    costPerMin: 3_600,
-    demandBoost: 2.0,
-    trafficMultiplier: 1.58,
+    description: 'Максимальный охват города, +50% поток и больше VIP',
+    costPerMin: 7_200,
+    demandBoost: 1.75,
+    trafficMultiplier: 1.5,
   },
 };

@@ -23,17 +23,17 @@ export function CompetitorCarWash() {
     []
   );
   const promoTex = useMemo(
-    () => getSignTexture('АКЦИЯ -18%!', 'СКИДКА ПРЯМО СЕЙЧАС', '#380910', '#FFB800', '#FFFFFF'),
+    () => getSignTexture('АКЦИЯ -22%!', 'СКИДКА ПРЯМО СЕЙЧАС', '#380910', '#FFB800', '#FFFFFF'),
     []
   );
-  const effPrice = promoActive ? Math.round((compPrice * 0.82) / 10) * 10 : compPrice;
+  const effPrice = promoActive ? Math.round((compPrice * 0.78) / 10) * 10 : compPrice;
   const priceTotemTex = useMemo(
     () =>
       getPriceTotemTexture(
         'TURBO SHINE',
         effPrice,
         '#FF4D4F',
-        promoActive ? 'АКЦИЯ -18%!' : undefined
+        promoActive ? 'АКЦИЯ -22%!' : undefined
       ),
     [effPrice, promoActive]
   );

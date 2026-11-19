@@ -123,8 +123,8 @@ interface GameStoreState {
   _bindSimulation: () => void;
 }
 
-const STARTING_BALANCE = 45_000;
-const TUTORIAL_BONUS = 5_000;
+const STARTING_BALANCE = 20_000;
+const TUTORIAL_BONUS = 3_500;
 
 function createInitialEconomy(): EconomyMetrics {
   return {
@@ -132,11 +132,11 @@ function createInitialEconomy(): EconomyMetrics {
     totalRevenue: 0,
     totalExpenses: 0,
     incomePerMin: 0,
-    expensesPerMin: 920,
-    profitPerMin: -920,
+    expensesPerMin: 1_850,
+    profitPerMin: -1_850,
     carsWashed: 0,
     carsLost: 0,
-    reputation: 3.55,
+    reputation: 3.25,
     washPrice: WASH_PRICE_DEFAULT,
     adCampaign: 'none',
     combo: 0,
@@ -166,15 +166,15 @@ function createInitialCompetitor(): CompetitorState {
   return {
     name: 'TURBO SHINE',
     bays: 2,
-    price: 1100,
-    quality: 2.35,
-    speedMultiplier: 1.02,
-    reputation: 3.4,
+    price: 900,
+    quality: 2.85,
+    speedMultiplier: 1.15,
+    reputation: 3.85,
     carsWashed: 0,
     totalRevenue: 0,
     revenuePerMin: 0,
     promoActive: false,
-    promoTimer: 52,
+    promoTimer: 36,
     lastUpgradeDay: 1,
   };
 }
@@ -314,14 +314,22 @@ export const useGameStore = create<GameStoreState>((set, get) => {
       },
 
       onCompetitorWashComplete: (payment) => {
-        set((state) => ({
-          competitor: {
-            ...state.competitor,
-            carsWashed: state.competitor.carsWashed + 1,
-            totalRevenue: state.competitor.totalRevenue + payment,
-            reputation: Math.min(4.6, +(state.competitor.reputation + 0.004).toFixed(2)),
-          },
-        }));
+        set((state) => {
+          const repStep =
+            state.competitor.reputation > 4.6
+              ? 0.003
+              : state.competitor.reputation > 4.25
+                ? 0.006
+                : 0.01;
+          return {
+            competitor: {
+              ...state.competitor,
+              carsWashed: state.competitor.carsWashed + 1,
+              totalRevenue: state.competitor.totalRevenue + payment,
+              reputation: Math.min(4.9, +(state.competitor.reputation + repStep).toFixed(3)),
+            },
+          };
+        });
       },
 
       onEconomyMinuteTick: (utility, salary, adCost, playerRevPerMin, compRevPerMin) => {
@@ -539,6 +547,10 @@ export const useGameStore = create<GameStoreState>((set, get) => {
           economy: {
             ...createInitialEconomy(),
             ...data.economy,
+            washPrice: Math.min(
+              WASH_PRICE_MAX,
+              Math.max(WASH_PRICE_MIN, data.economy.washPrice ?? WASH_PRICE_DEFAULT)
+            ),
           },
           upgrades: data.upgrades,
           workers: data.workers.length > 0 ? data.workers : [createStarterWorker()],

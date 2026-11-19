@@ -8,6 +8,7 @@ import {
   WASH_UTILITY_COST,
   WAX_BONUS_PER_LEVEL,
   getEquipmentSpeedMultiplier,
+  getFairWashPrice,
   getMaxQueueCapacity,
   getPlayerQualityScore,
   getUtilityDiscount,
@@ -93,9 +94,11 @@ class GameSimulation {
 
   private callbacks: SimulationCallbacks | null = null;
   private spawnTimer = 1.0;
-  private eventCooldown = 32;
+  private eventCooldown = 36;
   private activeEventTimer = 0;
   private lastSyncedEventSec = -1;
+  private compAiTimer = 15;
+  private compInvestedTier = 0;
   private uiSyncAccum = 0;
   private pendingMinuteDelta = 0;
   private pendingDtSec = 0;
@@ -132,9 +135,11 @@ class GameSimulation {
     this.competitorWorkers = createCompetitorWorkers(2);
     this.liveTimeOfDay = SHIFT_START_TIME;
     this.spawnTimer = 0.8;
-    this.eventCooldown = 34;
+    this.eventCooldown = 36;
     this.activeEventTimer = 0;
     this.lastSyncedEventSec = -1;
+    this.compAiTimer = 15;
+    this.compInvestedTier = 0;
     this.uiSyncAccum = 0;
     this.pendingMinuteDelta = 0;
     this.pendingDtSec = 0;
@@ -260,7 +265,7 @@ class GameSimulation {
     const cScore = this.computeAttractionScore('competitor', eco, upgrades, comp);
     const total = pScore + cScore;
     if (total <= 0.001) return 0.5;
-    return Math.min(0.92, Math.max(0.08, pScore / total));
+    return Math.min(0.84, Math.max(0.12, pScore / total));
   }
 
   private computeAttractionScore(
@@ -270,29 +275,58 @@ class GameSimulation {
     comp: CompetitorState
   ): number {
     const queueLen = this.getQueueCount(owner);
+    const playerEffPrice = eco.happyHourRemaining > 0 ? eco.washPrice * 0.85 : eco.washPrice;
+    const compEffPrice = comp.promoActive ? comp.price * 0.78 : comp.price;
+
     if (owner === 'player') {
       const quality = getPlayerQualityScore(upgrades);
-      const effectivePrice = eco.happyHourRemaining > 0 ? eco.washPrice * 0.85 : eco.washPrice;
-      const priceFactor = Math.max(0.22, 2.45 - ((effectivePrice - 600) / 1000) * 0.92);
-      const repFactor = 0.72 + eco.reputation * 0.45;
-      const qualityFactor = 0.72 + quality * 0.36;
+      const fairPrice = getFairWashPrice(quality, eco.reputation);
+      // True multiplicative price elasticity: overpricing sharply drives customers to TURBO SHINE!
+      const priceMult =
+        playerEffPrice <= fairPrice
+          ? Math.min(1.22, 1 + ((fairPrice - playerEffPrice) / fairPrice) * 0.45)
+          : Math.max(0.14, Math.pow(fairPrice / playerEffPrice, 2.35));
+
+      const priceGapBonus = Math.max(
+        -0.65,
+        Math.min(0.55, (compEffPrice - playerEffPrice) / 420)
+      );
+      const repFactor = 0.65 + eco.reputation * 0.48;
+      const qualityFactor = 0.6 + quality * 0.42;
+      const bayPresence = (upgrades.bays - 1) * 0.24;
       const adBoost = AD_CAMPAIGNS[eco.adCampaign].demandBoost;
-      const happyBoost = eco.happyHourRemaining > 0 ? 1.15 : 0;
+      const happyBoost = eco.happyHourRemaining > 0 ? 0.95 : 0;
       const queuePenalty = Math.max(
-        0.28,
-        1 - queueLen * (0.105 - (upgrades.vipLounge - 1) * 0.018)
+        0.24,
+        1 - queueLen * (0.115 - (upgrades.vipLounge - 1) * 0.018)
       );
-      return Math.max(
-        0.2,
-        (priceFactor + repFactor + qualityFactor + adBoost + happyBoost) * queuePenalty
+      const baseDesire = Math.max(
+        0.3,
+        repFactor + qualityFactor + bayPresence + adBoost + happyBoost + priceGapBonus
       );
+      return Math.max(0.15, baseDesire * priceMult * queuePenalty);
     } else {
-      const effectivePrice = comp.promoActive ? comp.price * 0.82 : comp.price;
-      const priceFactor = Math.max(0.22, 2.45 - ((effectivePrice - 600) / 1000) * 0.92);
-      const repFactor = 0.72 + comp.reputation * 0.45;
-      const qualityFactor = 0.72 + comp.quality * 0.36;
-      const queuePenalty = Math.max(0.28, 1 - queueLen * 0.12);
-      return Math.max(0.2, (priceFactor + repFactor + qualityFactor) * queuePenalty);
+      const fairPrice = getFairWashPrice(comp.quality, comp.reputation);
+      const priceMult =
+        compEffPrice <= fairPrice
+          ? Math.min(1.24, 1 + ((fairPrice - compEffPrice) / fairPrice) * 0.48)
+          : Math.max(0.22, Math.pow(fairPrice / compEffPrice, 2.1));
+
+      const priceGapBonus = Math.max(
+        -0.55,
+        Math.min(0.7, (playerEffPrice - compEffPrice) / 420)
+      );
+      const repFactor = 0.65 + comp.reputation * 0.48;
+      const qualityFactor = 0.6 + comp.quality * 0.42;
+      const bayPresence = (comp.bays - 1) * 0.28;
+      // During -22% promo, TURBO SHINE also runs a local ad blitz to steal customers back!
+      const promoBlitz = comp.promoActive ? 1.15 : 0.25;
+      const queuePenalty = Math.max(0.26, 1 - queueLen * 0.11);
+      const baseDesire = Math.max(
+        0.35,
+        repFactor + qualityFactor + bayPresence + promoBlitz + priceGapBonus
+      );
+      return Math.max(0.2, baseDesire * priceMult * queuePenalty);
     }
   }
 
@@ -464,36 +498,96 @@ class GameSimulation {
   private stepCompetitorAI(dt: number): void {
     if (!this.callbacks) return;
     const comp = this.callbacks.getCompetitor();
+    const eco = this.callbacks.getEconomy();
+    const upgrades = this.callbacks.getUpgrades();
     const day = this.callbacks.getDay();
+    const playerShare = this.getPlayerAttractionShare();
+    const playerQuality = getPlayerQualityScore(upgrades);
 
+    // 1. Reactive Promo & Price-War Blitz (-22% + ad push when losing market share!)
     let promoActive = comp.promoActive;
     let promoTimer = comp.promoTimer - dt;
     if (promoTimer <= 0) {
       if (promoActive) {
         promoActive = false;
-        promoTimer = 75 + Math.random() * 55;
-      } else if (Math.random() < 0.45) {
-        promoActive = true;
-        promoTimer = 34;
+        // Shorter cooldown when player is dominating so TURBO SHINE keeps pushing back!
+        promoTimer = playerShare > 0.54 ? 32 + Math.random() * 18 : 54 + Math.random() * 28;
       } else {
-        promoTimer = 52;
+        const triggerChance = playerShare > 0.56 ? 0.78 : playerShare > 0.48 ? 0.48 : 0.25;
+        if (Math.random() < triggerChance) {
+          promoActive = true;
+          promoTimer = 38;
+          if (this.callbacks.getStarted()) {
+            this.callbacks.onToast('TURBO SHINE: акция -22%!', undefined, 'coral');
+          }
+        } else {
+          promoTimer = 36;
+        }
       }
       this.callbacks.onCompetitorUpdate({ promoActive, promoTimer });
     } else {
       comp.promoTimer = promoTimer;
     }
 
-    // Competitor gradually upgrades on Day 3+
-    if (day >= 3 && comp.lastUpgradeDay < day) {
-      const nextBays = day >= 5 ? 3 : comp.bays;
-      const nextQuality = Math.min(4.2, +(comp.quality + 0.14).toFixed(2));
-      const nextSpeed = Math.min(1.55, +(comp.speedMultiplier + 0.05).toFixed(2));
-      this.callbacks.onCompetitorUpdate({
-        bays: nextBays,
-        quality: nextQuality,
-        speedMultiplier: nextSpeed,
-        lastUpgradeDay: day,
-      });
+    // 2. Active Strategic AI every 16 seconds: pricing, bay expansion & equipment race!
+    this.compAiTimer -= dt;
+    if (this.compAiTimer > 0) return;
+    this.compAiTimer = 16;
+
+    const patch: Partial<CompetitorState> = {};
+
+    // Open Bay #3 as soon as TURBO SHINE earns 42 000 ₽ OR player expands!
+    if (
+      comp.bays < 3 &&
+      (comp.totalRevenue >= 42_000 || (upgrades.bays >= 2 && day >= 2) || upgrades.bays >= 3)
+    ) {
+      patch.bays = 3;
+      if (this.callbacks.getStarted()) {
+        this.callbacks.onToast('TURBO SHINE открыл 3-й бокс!', undefined, 'coral');
+      }
+    }
+
+    // Invest competitor profits & match player's quality/speed upgrades so rivalry stays fierce!
+    const revTier = Math.floor(comp.totalRevenue / 40_000);
+    const qualityGap = playerQuality - comp.quality;
+    if (
+      (revTier > this.compInvestedTier || qualityGap >= 0.35 || comp.lastUpgradeDay < day) &&
+      (comp.quality < 4.85 || comp.speedMultiplier < 1.95)
+    ) {
+      this.compInvestedTier = Math.max(this.compInvestedTier, revTier);
+      const qStep = qualityGap >= 0.5 ? 0.24 : 0.16;
+      const sStep = qualityGap >= 0.5 ? 0.08 : 0.05;
+      patch.quality = Math.min(4.85, +(comp.quality + qStep).toFixed(2));
+      patch.speedMultiplier = Math.min(1.95, +(comp.speedMultiplier + sStep).toFixed(2));
+      patch.lastUpgradeDay = day;
+    }
+
+    // Dynamic Price Adaptation: undercut player when trailing, maximize margin when leading!
+    const compQualityNext = patch.quality ?? comp.quality;
+    const compFair = getFairWashPrice(compQualityNext, comp.reputation);
+    let desiredPrice = comp.price;
+
+    if (playerShare > 0.54) {
+      // Fight back by undercutting the player's price (within profitable bounds)
+      const undercut = Math.max(700, Math.min(compFair, eco.washPrice - 50));
+      desiredPrice = Math.round(undercut / 50) * 50;
+    } else if (playerShare < 0.44) {
+      // Leading the street: creep price up toward fair value to grow profits faster
+      const targetUp = Math.min(1_750, compFair, eco.washPrice + 100);
+      desiredPrice = Math.round(targetUp / 50) * 50;
+    } else {
+      // Stay competitive near fair market price
+      const balanced = Math.min(compFair, Math.max(800, eco.washPrice));
+      desiredPrice = Math.round(balanced / 50) * 50;
+    }
+
+    if (desiredPrice !== comp.price) {
+      const delta = Math.max(-100, Math.min(100, desiredPrice - comp.price));
+      patch.price = Math.max(700, Math.min(1_750, Math.round((comp.price + delta) / 50) * 50));
+    }
+
+    if (Object.keys(patch).length > 0) {
+      this.callbacks.onCompetitorUpdate(patch);
     }
   }
 
@@ -501,23 +595,24 @@ class GameSimulation {
     if (!this.callbacks) return;
     const eco = this.callbacks.getEconomy();
     const upgrades = this.callbacks.getUpgrades();
+    const comp = this.callbacks.getCompetitor();
     const activeEvent = this.callbacks.getActiveEvent();
 
     // Feel the rhythm of the day: calm early morning, vibrant midday, lively sunset rush hour!
     const hour = this.liveTimeOfDay * 24;
     const timeWave =
-      hour < 9.5 ? 0.9 : hour >= 16.5 && hour <= 19.8 ? 1.22 : hour > 20.5 ? 0.92 : 1.05;
+      hour < 9.5 ? 0.9 : hour >= 16.5 && hour <= 19.8 ? 1.2 : hour > 20.5 ? 0.92 : 1.04;
 
     const adSpec = AD_CAMPAIGNS[eco.adCampaign];
     const eventTraffic = activeEvent ? CITY_EVENTS[activeEvent.id].trafficMultiplier : 1.0;
-    const happyTraffic = eco.happyHourRemaining > 0 ? 1.35 : 1.0;
-    const baseInterval = 3.85 / (adSpec.trafficMultiplier * eventTraffic * happyTraffic * timeWave);
-    const bayBonus = Math.max(0.62, 1 - (upgrades.bays - 1) * 0.12);
-    const targetInterval = Math.max(1.55, baseInterval * bayBonus);
+    const happyTraffic = eco.happyHourRemaining > 0 ? 1.25 : 1.0;
+    const baseInterval = 4.35 / (adSpec.trafficMultiplier * eventTraffic * happyTraffic * timeWave);
+    const bayBonus = Math.max(0.66, 1 - (upgrades.bays - 1) * 0.11);
+    const targetInterval = Math.max(1.9, baseInterval * bayBonus);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer > 0) return;
-    this.spawnTimer = targetInterval * (0.75 + Math.random() * 0.48);
+    this.spawnTimer = targetInterval * (0.78 + Math.random() * 0.44);
 
     if (this.vehicles.length >= 16) return;
 
@@ -550,15 +645,19 @@ class GameSimulation {
     );
     if (tooClose) return;
 
-    // VIP roll for player side!
+    // VIP roll for player side (and high-rep competitor too!)
     let isVip = false;
-    if (chosenSide === 'player' && this.callbacks.getStarted()) {
-      const vipChance =
-        0.065 +
-        Math.max(0, eco.reputation - 3.4) * 0.045 +
-        (eco.adCampaign === 'radio' ? 0.05 : 0) +
-        (activeEvent ? CITY_EVENTS[activeEvent.id].vipChanceBonus : 0);
-      if (Math.random() < vipChance) {
+    if (this.callbacks.getStarted()) {
+      if (chosenSide === 'player') {
+        const vipChance =
+          0.05 +
+          Math.max(0, eco.reputation - 3.5) * 0.035 +
+          (eco.adCampaign === 'radio' ? 0.04 : 0) +
+          (activeEvent ? CITY_EVENTS[activeEvent.id].vipChanceBonus : 0);
+        if (Math.random() < vipChance) {
+          isVip = true;
+        }
+      } else if (comp.reputation >= 4.0 && Math.random() < 0.06) {
         isVip = true;
       }
     }
@@ -621,9 +720,9 @@ class GameSimulation {
           ? eco.washPrice * 0.85
           : eco.washPrice
         : comp.promoActive
-          ? comp.price * 0.82
+          ? comp.price * 0.78
           : comp.price;
-    const vipMult = isVip ? 2.35 : 1.0;
+    const vipMult = isVip ? 1.75 : 1.0;
     const expectedPrice = Math.round((basePrice * spec.priceMultiplier * vipMult) / 10) * 10;
     const rainDirt = activeEvent?.id === 'rain_aftermath' ? 1.0 : 0.82 + Math.random() * 0.18;
 
@@ -785,13 +884,17 @@ class GameSimulation {
 
         const patienceRate =
           car.owner === 'player'
-            ? 0.0105 / (1 + (upgrades.vipLounge - 1) * 0.28)
-            : 0.013;
+            ? 0.0115 / (1 + (upgrades.vipLounge - 1) * 0.24)
+            : 0.0125;
         car.patience = Math.max(0, car.patience - patienceRate * dt);
         if (car.patience <= 0) {
           if (car.owner === 'player') {
-            this.callbacks.onPlayerCarLost(car.isVip ? -0.12 : -0.07);
+            this.callbacks.onPlayerCarLost(car.isVip ? -0.16 : -0.1);
             this.addPopup(car.x, 2.4, car.z, 'Уехал (очередь)', '#FF3B5C');
+          } else {
+            this.callbacks.onCompetitorUpdate({
+              reputation: Math.max(2.6, +(comp.reputation - 0.025).toFixed(3)),
+            });
           }
           this.sendCarToExit(car, true);
         }
@@ -1044,22 +1147,30 @@ class GameSimulation {
       const workerQuality = workerProfile ? workerProfile.quality : 1.0;
 
       if (car.owner === 'player') {
-        const foamTip = 1 + (upgrades.foamSystem - 1) * 0.14;
+        const foamTip = 1 + (upgrades.foamSystem - 1) * 0.06;
         const waxBonus = (upgrades.dryerWax - 1) * WAX_BONUS_PER_LEVEL;
         const loungeTip = (upgrades.vipLounge - 1) * LOUNGE_TIP_PER_LEVEL;
-        const comboBonus = 1 + Math.min(0.5, Math.floor((eco.combo + 1) / 2) * 0.05);
+        const comboBonus = 1 + Math.min(0.2, Math.floor((eco.combo + 1) / 2) * 0.02);
         const eventTip = activeEvent ? CITY_EVENTS[activeEvent.id].tipMultiplier : 1.0;
         const eventRep = activeEvent ? CITY_EVENTS[activeEvent.id].repMultiplier : 1.0;
 
         const rawPayment =
-          (car.expectedPrice * (0.86 + workerQuality * 0.18) * foamTip + waxBonus + loungeTip) *
+          (car.expectedPrice * (0.9 + workerQuality * 0.12) * foamTip + waxBonus + loungeTip) *
           comboBonus *
           eventTip;
         const payment = Math.round(rawPayment / 10) * 10;
 
+        const repDiminish =
+          eco.reputation > 4.65
+            ? 0.22
+            : eco.reputation > 4.25
+              ? 0.45
+              : eco.reputation > 3.85
+                ? 0.72
+                : 1.0;
         const baseRep =
-          (car.isVip ? 0.11 : 0.028) + (upgrades.foamSystem + upgrades.vipLounge - 2) * 0.006;
-        const repGain = +(baseRep * eventRep).toFixed(3);
+          (car.isVip ? 0.048 : 0.015) + (upgrades.foamSystem + upgrades.vipLounge - 2) * 0.0025;
+        const repGain = +(baseRep * eventRep * repDiminish).toFixed(3);
         const utilityForWash = Math.round(WASH_UTILITY_COST * getUtilityDiscount(upgrades.ecoSolar));
 
         this.minutePlayerRev += payment;
@@ -1082,7 +1193,7 @@ class GameSimulation {
           this.addPopup(car.x, 2.7, car.z, formatRub(payment, { signed: true }), '#22C55E');
         }
       } else {
-        const payment = Math.round((car.expectedPrice * (0.95 + comp.quality * 0.05)) / 10) * 10;
+        const payment = Math.round((car.expectedPrice * (0.96 + comp.quality * 0.07)) / 10) * 10;
         this.minuteCompRev += payment;
         this.callbacks.onCompetitorWashComplete(payment);
         this.addPopup(car.x, 2.6, car.z, formatRub(payment, { signed: true }), '#FF9F43');

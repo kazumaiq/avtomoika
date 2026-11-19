@@ -103,7 +103,7 @@ export function TopHud() {
     : '';
 
   const eventSpec = activeEvent ? CITY_EVENTS[activeEvent.id] : null;
-  const comboTipBonus = Math.min(50, Math.round(economy.combo * 5));
+  const comboTipBonus = Math.min(20, Math.floor(economy.combo / 2) * 2);
 
   const cycleSpeed = () => {
     const next: 1 | 2 | 3 = simSpeed === 1 ? 2 : simSpeed === 2 ? 3 : 1;

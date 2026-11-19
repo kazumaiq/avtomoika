@@ -13,6 +13,7 @@ import {
   WASH_PRICE_MAX,
   WASH_PRICE_MIN,
   WASH_PRICE_STEP,
+  getFairWashPrice,
   getPlayerQualityScore,
 } from '../../config/upgrades';
 import { gameSimulation } from '../../engine/simulation';
@@ -32,9 +33,10 @@ export function BusinessPanel() {
   const setActivePanel = useGameStore((s) => s.setActivePanel);
 
   const quality = getPlayerQualityScore(upgrades);
+  const fairPrice = getFairWashPrice(quality, economy.reputation);
   const sharePct = Math.round(gameSimulation.getPlayerAttractionShare() * 100);
   const compEffPrice = competitor.promoActive
-    ? Math.round(competitor.price * 0.82)
+    ? Math.round((competitor.price * 0.78) / 10) * 10
     : competitor.price;
 
   const rankInfo = getBusinessRank(economy, upgrades);
@@ -251,8 +253,8 @@ export function BusinessPanel() {
           </div>
 
           <p className="card-sub">
-            Спорткары и VIP-клиенты платят в 2–3 раза выше базовой цены. Поднимайте чек по мере
-            роста рейтинга и оборудования.
+            Оптимальный чек для вашего качества: <strong style={{ color: '#f8fafc' }}>~{formatRub(fairPrice)}</strong>.
+            Если задрать цену сильно выше — клиенты массово уедут в TURBO SHINE!
           </p>
         </div>
 
