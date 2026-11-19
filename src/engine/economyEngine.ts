@@ -464,7 +464,7 @@ export function calculatePlayerExpensesPerMin(params: {
   );
 
   const maintenance = Math.round(
-    (params.upgrades.bays * 110 + Math.max(0, 100 - params.equipmentCondition) * 5) *
+    (params.upgrades.bays * 70 + Math.max(0, 100 - params.equipmentCondition) * 3) *
       (hasWarehouse ? 0.92 : 1.0) *
       (hasHoldingProc ? 0.94 : 1.0)
   );

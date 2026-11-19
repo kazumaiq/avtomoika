@@ -81,7 +81,7 @@ const LEVEL_UNLOCKS: Record<number, string> = {
 export const ENTREPRENEUR_LEVELS: EntrepreneurLevelSpec[] = Array.from({ length: 30 }, (_, i) => {
   const level = i + 1;
   // Smooth long-term XP curve: Lv.2 ~ 250 XP, Lv.5 ~ 2 200 XP, Lv.10 ~ 14 000 XP, Lv.20 ~ 110 000 XP, Lv.30 ~ 420 000 XP
-  const xpRequired = level === 1 ? 0 : Math.round(140 * Math.pow(level - 1, 2.38) / 10) * 10;
+  const xpRequired = level === 1 ? 0 : Math.round((105 * Math.pow(level - 1, 2.28)) / 10) * 10;
   const rewardCash = level === 1 ? 0 : Math.round((2500 + level * 1800) / 500) * 500;
   return {
     level,
@@ -205,15 +205,15 @@ export const DISTRICTS: Record<DistrictId, DistrictSpec> = {
     subtitle: 'Недорогая аренда, стабильный бюджетный поток',
     unlockLevel: 1,
     unlockCost: 0,
-    rentPerMin: 320,
+    rentPerMin: 220,
     landPrice: 180_000,
     buildingPrice: 320_000,
-    marketCapacityPerMin: 5.2,
+    marketCapacityPerMin: 5.6,
     priceToleranceMult: 1.0,
     rivalName: 'TURBO SHINE',
     rivalStartBays: 2,
-    rivalStartQuality: 2.75,
-    rivalStartRep: 3.75,
+    rivalStartQuality: 2.35,
+    rivalStartRep: 3.45,
     rivalStartPrice: 850,
     segmentWeights: { economy: 38, regular: 38, loyal: 14, corporate: 4, premium: 4, vip: 2 },
     accentColor: '#38BDF8',
@@ -744,7 +744,7 @@ export const DOCUMENTS_CATALOG: DocumentSpec[] = [
     id: 'bay_permit_2',
     title: 'Разрешение на строительство Бокса #2',
     subtitle: 'Требуется для расширения мойки до 2 боксов',
-    cost: 18_000,
+    cost: 10_000,
     unlockLevel: 2,
     requiredFor: 'Бокс #2',
   },
@@ -752,7 +752,7 @@ export const DOCUMENTS_CATALOG: DocumentSpec[] = [
     id: 'bay_permit_3',
     title: 'Разрешение на строительство Бокса #3',
     subtitle: 'Требуется для расширения мойки до 3 боксов',
-    cost: 48_000,
+    cost: 28_000,
     unlockLevel: 5,
     requiredFor: 'Бокс #3',
   },
@@ -760,7 +760,7 @@ export const DOCUMENTS_CATALOG: DocumentSpec[] = [
     id: 'bay_permit_4',
     title: 'Разрешение на строительство Бокса #4',
     subtitle: 'Требуется для расширения мойки до 4 боксов',
-    cost: 115_000,
+    cost: 65_000,
     unlockLevel: 9,
     requiredFor: 'Бокс #4',
   },

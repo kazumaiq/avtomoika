@@ -5,8 +5,8 @@ export const WASH_PRICE_MIN = 500;
 export const WASH_PRICE_MAX = 2200;
 export const WASH_PRICE_STEP = 50;
 export const WASH_PRICE_DEFAULT = 850;
-export const BAY_UTILITY_PER_MIN = 420;
-export const WASH_UTILITY_COST = 115;
+export const BAY_UTILITY_PER_MIN = 240;
+export const WASH_UTILITY_COST = 75;
 export const WAX_BONUS_PER_LEVEL = 75;
 export const LOUNGE_TIP_PER_LEVEL = 55;
 
@@ -17,8 +17,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Открывает новые крытые боксы с оборудованием',
     category: 'expansion',
     maxLevel: 4,
-    baseCost: 48_000,
-    costMultiplier: 2.85,
+    baseCost: 34_000,
+    costMultiplier: 2.65,
     effectLabel: (lv) => `${lv} из 4 боксов`,
     nextEffectLabel: (next) => `Открыть Бокс #${next}`,
   },
@@ -28,8 +28,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Мощные турбофорсунки ускоряют смыв грязи',
     category: 'equipment',
     maxLevel: 5,
-    baseCost: 18_000,
-    costMultiplier: 2.25,
+    baseCost: 11_000,
+    costMultiplier: 2.15,
     effectLabel: (lv) => `+${(lv - 1) * 14}% к скорости мойки`,
     nextEffectLabel: (next) => `+${(next - 1) * 14}% к скорости мойки`,
   },
@@ -39,8 +39,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Густая цветная пена повышает качество и чек',
     category: 'equipment',
     maxLevel: 5,
-    baseCost: 22_000,
-    costMultiplier: 2.3,
+    baseCost: 13_500,
+    costMultiplier: 2.2,
     effectLabel: (lv) => `+${(lv - 1) * 6}% к чеку и качество`,
     nextEffectLabel: (next) => `+${(next - 1) * 6}% к чеку и качество`,
   },
@@ -50,8 +50,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Арки обдува и воск придают зеркальный блеск',
     category: 'equipment',
     maxLevel: 5,
-    baseCost: 28_000,
-    costMultiplier: 2.35,
+    baseCost: 16_500,
+    costMultiplier: 2.25,
     effectLabel: (lv) =>
       `+${(lv - 1) * 8}% сушка, +${formatRub((lv - 1) * WAX_BONUS_PER_LEVEL)} бонус`,
     nextEffectLabel: (next) =>
@@ -63,8 +63,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Комфорт и кофе удерживают очередь и растят рейтинг',
     category: 'facility',
     maxLevel: 4,
-    baseCost: 25_000,
-    costMultiplier: 2.4,
+    baseCost: 15_000,
+    costMultiplier: 2.25,
     effectLabel: (lv) => `+${(lv - 1) * 24}% терпение, +${((lv - 1) * 0.25).toFixed(2)}★`,
     nextEffectLabel: (next) => `+${(next - 1) * 24}% терпение, +${((next - 1) * 0.25).toFixed(2)}★`,
   },
@@ -74,8 +74,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Снижает аренду, воду и электричество в боксах',
     category: 'facility',
     maxLevel: 4,
-    baseCost: 26_000,
-    costMultiplier: 2.35,
+    baseCost: 15_500,
+    costMultiplier: 2.2,
     effectLabel: (lv) => `-${(lv - 1) * 18}% расходы на боксы и воду`,
     nextEffectLabel: (next) => `-${(next - 1) * 18}% расходы на боксы и воду`,
   },
@@ -85,8 +85,8 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     subtitle: 'Больше мест ожидания на въезде и подсветка полос',
     category: 'expansion',
     maxLevel: 3,
-    baseCost: 32_000,
-    costMultiplier: 2.6,
+    baseCost: 18_000,
+    costMultiplier: 2.35,
     effectLabel: (lv) => `До ${getMaxQueueCapacity(lv)} машин в очереди`,
     nextEffectLabel: (next) => `До ${getMaxQueueCapacity(next)} машин в очереди`,
   },

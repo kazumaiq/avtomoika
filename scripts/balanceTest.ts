@@ -64,12 +64,12 @@ interface SimResult {
 
 function makeInitialState() {
   const eco: EconomyMetrics = {
-    balance: 22_000,
+    balance: 26_000,
     totalRevenue: 0,
     totalExpenses: 0,
     incomePerMin: 0,
-    expensesPerMin: 2_380,
-    profitPerMin: -2_380,
+    expensesPerMin: 1_120,
+    profitPerMin: -1_120,
     carsWashed: 0,
     carsLost: 0,
     reputation: 3.25,
@@ -278,9 +278,9 @@ function runSimulation(strategy: StrategyId, totalMinutes: number, stepSec = 15)
       stepPlayerRev += payout.total;
       stepPlayerWashUtil += payout.utilityCost;
       eco.reputation = Math.min(5.0, +(eco.reputation + 0.008).toFixed(3));
-      eco.equipmentCondition = Math.max(15, +(eco.equipmentCondition - 1.1).toFixed(1));
+      eco.equipmentCondition = Math.max(15, +(eco.equipmentCondition - 0.55).toFixed(1));
       for (const w of workers) {
-        w.fatigue = Math.min(100, +(w.fatigue + 2.8 / workers.length).toFixed(1));
+        w.fatigue = Math.min(100, +(w.fatigue + 1.8 / workers.length).toFixed(1));
       }
       eco.entrepreneurXp += isVip ? 26 : 12;
       const lvSpec = getLevelForXp(eco.entrepreneurXp);
@@ -369,7 +369,7 @@ function runSimulation(strategy: StrategyId, totalMinutes: number, stepSec = 15)
     if (strategy !== 'A_passive') {
       // Repair equipment when below 60%
       if (eco.equipmentCondition < 60) {
-        const repCost = Math.round((100 - eco.equipmentCondition) * 110 * upgrades.bays);
+        const repCost = Math.round((100 - eco.equipmentCondition) * 65 * upgrades.bays);
         if (eco.balance >= repCost + 4_000) {
           eco.balance -= repCost;
           eco.totalExpenses += repCost;
@@ -404,9 +404,9 @@ function runSimulation(strategy: StrategyId, totalMinutes: number, stepSec = 15)
       // Upgrades & Permits for B_upgrades and E_tycoon
       if (strategy === 'B_upgrades' || strategy === 'E_tycoon') {
         // Buy Bay #2 permit + Bay #2 when affordable
-        if (!empire.tax.documents.bay_permit_2 && eco.entrepreneurLevel >= 2 && eco.balance >= 24_000) {
-          eco.balance -= 18_000;
-          eco.totalExpenses += 18_000;
+        if (!empire.tax.documents.bay_permit_2 && eco.entrepreneurLevel >= 2 && eco.balance >= 14_000) {
+          eco.balance -= 10_000;
+          eco.totalExpenses += 10_000;
           empire.tax.documents.bay_permit_2 = true;
         }
         const bayCost = getUpgradeCost('bays', upgrades.bays);
@@ -423,9 +423,9 @@ function runSimulation(strategy: StrategyId, totalMinutes: number, stepSec = 15)
         }
 
         // Buy Bay #3 permit + Bay #3
-        if (!empire.tax.documents.bay_permit_3 && eco.entrepreneurLevel >= 5 && eco.balance >= 60_000) {
-          eco.balance -= 48_000;
-          eco.totalExpenses += 48_000;
+        if (!empire.tax.documents.bay_permit_3 && eco.entrepreneurLevel >= 5 && eco.balance >= 36_000) {
+          eco.balance -= 28_000;
+          eco.totalExpenses += 28_000;
           empire.tax.documents.bay_permit_3 = true;
         }
         const bay3Cost = getUpgradeCost('bays', upgrades.bays);
@@ -605,6 +605,7 @@ console.log(`[Tax_Audit] Missing docs -> fine ${auditRes.fine}₽ ("${auditRes.r
 // 5. Key Balance Assertions
 const r10 = runSimulation('E_tycoon', 10);
 assert(r10.bays === 1, `Player should NOT unlock Bay #2 within 10 minutes! Got bays=${r10.bays}`);
+assert(stratResults.A_passive.balance > 0, `Casual 1-bay play should be profitable, got ${stratResults.A_passive.balance}₽`);
 assert(stratResults.E_tycoon.netWorth > stratResults.D_dumping.netWorth, 'Smart tycoon strategy must outperform reckless price dumping');
 assert(stratResults.E_tycoon.netWorth > stratResults.A_passive.netWorth, 'Active management must outperform passive no-upgrade play');
 assert(stratResults.E_tycoon.compBalance > 0, 'Competitor TURBO SHINE must remain financially viable');

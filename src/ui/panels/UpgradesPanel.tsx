@@ -22,7 +22,7 @@ export function UpgradesPanel() {
 
   const missingCond = Math.max(0, 100 - economy.equipmentCondition);
   const hasCarService = empire.businesses.some((b) => !b.underConstruction && b.type === 'car_service');
-  const repairCost = Math.round(missingCond * 110 * upgrades.bays * (hasCarService ? 0.8 : 1.0));
+  const repairCost = Math.round(missingCond * 65 * upgrades.bays * (hasCarService ? 0.8 : 1.0));
 
   return (
     <div className="panel-sheet">

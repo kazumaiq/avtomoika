@@ -40,7 +40,7 @@ export function StaffPanel() {
     tutorialActive && tutorialStep === 1 ? 'hire' : 'team'
   );
 
-  const restCost = workers.length * 1_200;
+  const restCost = workers.length * 600;
   const anyTired = workers.some((w) => w.fatigue > 25);
 
   return (

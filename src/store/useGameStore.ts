@@ -188,7 +188,7 @@ interface GameStoreState {
   _bindSimulation: () => void;
 }
 
-const STARTING_BALANCE = 22_000;
+const STARTING_BALANCE = 26_000;
 const TUTORIAL_BONUS = 3_000;
 
 function createInitialContracts(): CorporateContract[] {
@@ -265,8 +265,8 @@ function createInitialEconomy(): EconomyMetrics {
     totalRevenue: 0,
     totalExpenses: 0,
     incomePerMin: 0,
-    expensesPerMin: 2_380,
-    profitPerMin: -2_380,
+    expensesPerMin: 1_120,
+    profitPerMin: -1_120,
     carsWashed: 0,
     carsLost: 0,
     reputation: 3.25,
@@ -417,11 +417,11 @@ export const useGameStore = create<GameStoreState>((set, get) => {
 
           // Equipment wear per washed car
           const wearDelta =
-            1.15 * eventWear * (hasPrevMaint ? 0.6 : 1.0) * (hasTech ? 0.55 : 1.0);
+            0.55 * eventWear * (hasPrevMaint ? 0.6 : 1.0) * (hasTech ? 0.55 : 1.0);
           const nextCondition = Math.max(8, +(state.economy.equipmentCondition - wearDelta).toFixed(1));
 
           // Worker XP + realistic fatigue
-          const fatigueStep = 3.2 * (hasAdmin ? 0.7 : 1.0) * (hasDispatch ? 0.75 : 1.0);
+          const fatigueStep = 1.8 * (hasAdmin ? 0.7 : 1.0) * (hasDispatch ? 0.75 : 1.0);
           let nextWorkers = state.workers;
           if (workerId) {
             nextWorkers = state.workers.map((w) => {
@@ -1443,7 +1443,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
       const hasCarService = s.empire.businesses.some(
         (b) => !b.underConstruction && b.type === 'car_service'
       );
-      const cost = Math.round(missing * 110 * s.upgrades.bays * (hasCarService ? 0.8 : 1.0));
+      const cost = Math.round(missing * 65 * s.upgrades.bays * (hasCarService ? 0.8 : 1.0));
       if (s.economy.balance < cost) {
         soundEngine.playError();
         return false;
@@ -1967,7 +1967,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
 
     restWorkers: () => {
       const s = get();
-      const cost = s.workers.length * 1_200;
+      const cost = s.workers.length * 600;
       if (s.economy.balance < cost) {
         soundEngine.playError();
         return false;
