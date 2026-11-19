@@ -1,4 +1,4 @@
-import { RotateCcw, Save, Settings, Sun, Volume2, X } from 'lucide-react';
+import { GraduationCap, RotateCcw, Save, Settings, Sun, Volume2, X } from 'lucide-react';
 import { useState } from 'react';
 import { soundEngine } from '../../audio/soundEngine';
 import { useGameStore } from '../../store/useGameStore';
@@ -10,6 +10,7 @@ export function SettingsPanel() {
   const updateSettings = useGameStore((s) => s.updateSettings);
   const saveNow = useGameStore((s) => s.saveNow);
   const resetProgress = useGameStore((s) => s.resetProgress);
+  const restartTutorial = useGameStore((s) => s.restartTutorial);
   const setActivePanel = useGameStore((s) => s.setActivePanel);
 
   const [confirmReset, setConfirmReset] = useState(false);
@@ -41,7 +42,7 @@ export function SettingsPanel() {
       <div className="panel-header">
         <div className="panel-title-wrap">
           <Settings size={18} color="#94a3b8" />
-          <h2 className="panel-title">Настройки и сохранение</h2>
+          <h2 className="panel-title">Настройки и обучение</h2>
         </div>
         <button className="icon-btn" onClick={() => setActivePanel(null)} aria-label="Закрыть">
           <X size={16} />
@@ -146,13 +147,29 @@ export function SettingsPanel() {
               marginTop: 4,
             }}
           >
-            <span>Всплывающие +$ над боксами</span>
+            <span>Всплывающие +₽ над боксами</span>
             <input
               type="checkbox"
               checked={settings.showPopups}
               onChange={(e) => updateSettings({ showPopups: e.target.checked })}
             />
           </label>
+        </div>
+
+        {/* Onboarding Replay */}
+        <div className="ui-card">
+          <span className="section-label">Обучение</span>
+          <span className="card-sub">
+            Пошаговый гид по управлению автомойкой, персоналом, ценами и турбо-помощью.
+          </span>
+          <button
+            id="btn-replay-tutorial"
+            className="btn-secondary"
+            onClick={restartTutorial}
+          >
+            <GraduationCap size={15} color="#00d4ff" />
+            Пройти обучение заново
+          </button>
         </div>
 
         {/* Save & Reset */}

@@ -6,7 +6,9 @@ import { useGameStore } from './store/useGameStore';
 import { BottomDock } from './ui/BottomDock';
 import { SelectionInspector } from './ui/SelectionInspector';
 import { StartScreen } from './ui/StartScreen';
+import { ToastFeed } from './ui/ToastFeed';
 import { TopHud } from './ui/TopHud';
+import { TutorialOverlay } from './ui/TutorialOverlay';
 import { BusinessPanel } from './ui/panels/BusinessPanel';
 import { CompetitorPanel } from './ui/panels/CompetitorPanel';
 import { SettingsPanel } from './ui/panels/SettingsPanel';
@@ -48,6 +50,7 @@ export function App() {
       ) : (
         <div className="hud-layer">
           <TopHud />
+          <ToastFeed />
 
           <AnimatePresence>
             <SelectionInspector />
@@ -59,6 +62,7 @@ export function App() {
           {activePanel === 'competitor' && <CompetitorPanel />}
           {activePanel === 'settings' && <SettingsPanel />}
 
+          <TutorialOverlay />
           <BottomDock />
         </div>
       )}

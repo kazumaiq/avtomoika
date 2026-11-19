@@ -1,13 +1,16 @@
-import { Award, DollarSign, RefreshCw, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { Award, RefreshCw, RussianRuble, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useState } from 'react';
 import { getRaiseAmount, getTrainingCost } from '../../config/staff';
 import { useGameStore } from '../../store/useGameStore';
+import { formatRub, formatRubPerMin } from '../../utils/currency';
 
 export function StaffPanel() {
   const workers = useGameStore((s) => s.workers);
   const candidates = useGameStore((s) => s.candidates);
   const balance = useGameStore((s) => s.economy.balance);
   const unlockedBays = useGameStore((s) => s.upgrades.bays);
+  const tutorialActive = useGameStore((s) => s.tutorialActive);
+  const tutorialStep = useGameStore((s) => s.tutorialStep);
 
   const hireCandidate = useGameStore((s) => s.hireCandidate);
   const fireWorker = useGameStore((s) => s.fireWorker);
@@ -18,7 +21,10 @@ export function StaffPanel() {
   const setSelection = useGameStore((s) => s.setSelection);
   const setActivePanel = useGameStore((s) => s.setActivePanel);
 
-  const [tab, setTab] = useState<'team' | 'hire'>('team');
+  // During tutorial step 2 ("Hire a second worker"), open directly on the Hire tab for frictionless UX
+  const [tab, setTab] = useState<'team' | 'hire'>(
+    tutorialActive && tutorialStep === 2 ? 'hire' : 'team'
+  );
 
   return (
     <div className="panel-sheet">
@@ -84,7 +90,7 @@ export function StaffPanel() {
                           {w.name} <span className="val-cyan">Lv.{w.level}</span>
                         </div>
                         <div className="card-sub">
-                          {w.roleTitle} • ${w.salaryPerMin}/мин
+                          {w.roleTitle} • {formatRubPerMin(w.salaryPerMin)}
                         </div>
                       </div>
                     </div>
@@ -157,7 +163,7 @@ export function StaffPanel() {
                       onClick={() => trainWorker(w.id)}
                     >
                       <Award size={13} />
-                      {w.level >= 10 ? 'Макс. уровень' : `Навыки $${trainCost}`}
+                      {w.level >= 10 ? 'Макс. уровень' : `Навыки ${formatRub(trainCost)}`}
                     </button>
                     <button
                       className="btn-secondary"
@@ -165,8 +171,8 @@ export function StaffPanel() {
                       disabled={w.morale >= 1.35}
                       onClick={() => giveWorkerRaise(w.id)}
                     >
-                      <DollarSign size={13} />
-                      {w.morale >= 1.35 ? 'Макс. мораль' : `ЗП +$${raiseAmt}`}
+                      <RussianRuble size={12} />
+                      {w.morale >= 1.35 ? 'Макс. мораль' : `ЗП +${raiseAmt} ₽`}
                     </button>
                   </div>
                 </div>
@@ -186,14 +192,17 @@ export function StaffPanel() {
             {candidates.map((cand) => {
               const canAfford = balance >= cand.hireCost && workers.length < 8;
               return (
-                <div key={cand.id} className="ui-card">
+                <div
+                  key={cand.id}
+                  className={`ui-card ${canAfford ? 'upgrade-affordable' : ''}`}
+                >
                   <div className="ui-card-row">
                     <div>
                       <div className="card-title">
                         {cand.name} <span className="val-cyan">Lv.{cand.level}</span>
                       </div>
                       <div className="card-sub">
-                        {cand.roleTitle} • Зарплата ${cand.salaryPerMin}/мин
+                        {cand.roleTitle} • Зарплата {formatRubPerMin(cand.salaryPerMin)}
                       </div>
                     </div>
                     <button
@@ -201,7 +210,8 @@ export function StaffPanel() {
                       disabled={!canAfford}
                       onClick={() => hireCandidate(cand.id)}
                     >
-                      <UserPlus size={14} />${cand.hireCost}
+                      <UserPlus size={14} />
+                      {formatRub(cand.hireCost)}
                     </button>
                   </div>
                   <div className="ui-card-row" style={{ fontSize: 12 }}>

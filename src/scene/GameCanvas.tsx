@@ -93,12 +93,12 @@ export function GameCanvas() {
         <Canvas
           shadows={quality !== 'low'}
           dpr={dpr}
-          camera={{ position: [30, 27, 36], fov: 44, near: 0.5, far: 260 }}
+          camera={{ position: [27, 23, 31], fov: 44, near: 0.5, far: 260 }}
           gl={{
             antialias: quality !== 'low',
             powerPreference: 'high-performance',
             toneMapping: THREE.ACESFilmicToneMapping,
-            toneMappingExposure: 1.08,
+            toneMappingExposure: 1.16,
           }}
           onPointerMissed={() => setSelection(null)}
         >

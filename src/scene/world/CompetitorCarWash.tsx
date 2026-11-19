@@ -6,15 +6,17 @@ import { gameSimulation } from '../../engine/simulation';
 import {
   getBayFloorTexture,
   getLotConcreteTexture,
+  getPriceTotemTexture,
   getSignTexture,
 } from '../../graphics/proceduralTextures';
 import { useGameStore } from '../../store/useGameStore';
 
 export function CompetitorCarWash() {
   const compBays = useGameStore((s) => s.competitor.bays);
+  const compPrice = useGameStore((s) => s.competitor.price);
   const promoActive = useGameStore((s) => s.competitor.promoActive);
 
-  const lotTex = useMemo(() => getLotConcreteTexture('#322D38'), []);
+  const lotTex = useMemo(() => getLotConcreteTexture('#38313F'), []);
   const bayFloorTex = useMemo(() => getBayFloorTexture('#FF4D4F'), []);
   const signTex = useMemo(
     () => getSignTexture('TURBO SHINE', 'ЭКСПРЕСС АВТОМОЙКА • КОНКУРЕНТ', '#1D0F18', '#FF4D4F', '#FFE5B4'),
@@ -23,6 +25,17 @@ export function CompetitorCarWash() {
   const promoTex = useMemo(
     () => getSignTexture('АКЦИЯ -18%!', 'СКИДКА ПРЯМО СЕЙЧАС', '#380910', '#FFB800', '#FFFFFF'),
     []
+  );
+  const effPrice = promoActive ? Math.round((compPrice * 0.82) / 10) * 10 : compPrice;
+  const priceTotemTex = useMemo(
+    () =>
+      getPriceTotemTexture(
+        'TURBO SHINE',
+        effPrice,
+        '#FF4D4F',
+        promoActive ? 'АКЦИЯ -18%!' : undefined
+      ),
+    [effPrice, promoActive]
   );
 
   const ledRefs = useRef<Array<THREE.MeshStandardMaterial | null>>([null, null, null]);
@@ -35,21 +48,47 @@ export function CompetitorCarWash() {
       if (status === 'free') {
         mat.color.set('#22C55E');
         mat.emissive.set('#22C55E');
-        mat.emissiveIntensity = 1.1;
+        mat.emissiveIntensity = 1.2;
       } else if (status === 'washing') {
         mat.color.set('#FF4D4F');
         mat.emissive.set('#FF4D4F');
-        mat.emissiveIntensity = 2.0;
+        mat.emissiveIntensity = 2.2;
       } else {
         mat.color.set('#FFB800');
         mat.emissive.set('#FFB800');
-        mat.emissiveIntensity = 1.7;
+        mat.emissiveIntensity = 1.8;
       }
     }
   });
 
   return (
     <group>
+      {/* Competitor Live Ruble Price Totem */}
+      <group position={[-14.2, 0.08, -7.9]} rotation={[0, 0.32, 0]}>
+        <mesh position={[0, 2.35, 0]} castShadow>
+          <boxGeometry args={[1.65, 4.7, 0.36]} />
+          <meshStandardMaterial color="#1A1018" roughness={0.35} metalness={0.5} />
+        </mesh>
+        <mesh position={[0, 2.35, 0.2]}>
+          <planeGeometry args={[1.5, 4.4]} />
+          <meshStandardMaterial
+            map={priceTotemTex}
+            emissive="#FFFFFF"
+            emissiveMap={priceTotemTex}
+            emissiveIntensity={0.85}
+          />
+        </mesh>
+        <mesh position={[0, 2.35, -0.2]} rotation={[0, Math.PI, 0]}>
+          <planeGeometry args={[1.5, 4.4]} />
+          <meshStandardMaterial
+            map={priceTotemTex}
+            emissive="#FFFFFF"
+            emissiveMap={priceTotemTex}
+            emissiveIntensity={0.85}
+          />
+        </mesh>
+      </group>
+
       {/* Competitor Concrete Lot Pad (Z = -30.5 to -7.5, X = -22 to +22) */}
       <mesh position={[0, 0.03, -19.0]} receiveShadow>
         <boxGeometry args={[44, 0.08, 23]} />
@@ -91,7 +130,7 @@ export function CompetitorCarWash() {
           <meshStandardMaterial
             color="#FDBA74"
             emissive="#F97316"
-            emissiveIntensity={0.45}
+            emissiveIntensity={0.55}
             roughness={0.2}
           />
         </mesh>
@@ -101,7 +140,7 @@ export function CompetitorCarWash() {
         </mesh>
         <mesh position={[0, 4.78, 4.12]}>
           <boxGeometry args={[5.4, 0.18, 0.12]} />
-          <meshStandardMaterial color="#FF4D4F" emissive="#FF4D4F" emissiveIntensity={2.0} />
+          <meshStandardMaterial color="#FF4D4F" emissive="#FF4D4F" emissiveIntensity={2.1} />
         </mesh>
       </group>
 
@@ -132,7 +171,7 @@ export function CompetitorCarWash() {
             depthWrite={false}
           />
         </mesh>
-        <pointLight position={[0, 4.0, 0]} color="#FFE4D6" intensity={16} distance={22} decay={1.6} />
+        <pointLight position={[0, 4.2, 0]} color="#FFE8DC" intensity={24} distance={26} decay={1.5} />
         <mesh position={[0, 4.72, 4.2]}>
           <boxGeometry args={[20.7, 0.22, 0.14]} />
           <meshStandardMaterial color="#FF4D4F" emissive="#FF4D4F" emissiveIntensity={2.1} />

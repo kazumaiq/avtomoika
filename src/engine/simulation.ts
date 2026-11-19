@@ -1,7 +1,12 @@
 import { soundEngine } from '../audio/soundEngine';
+import { CITY_EVENTS } from '../config/progression';
 import { createCompetitorWorkers } from '../config/staff';
 import {
   AD_CAMPAIGNS,
+  BAY_UTILITY_PER_MIN,
+  LOUNGE_TIP_PER_LEVEL,
+  WASH_UTILITY_COST,
+  WAX_BONUS_PER_LEVEL,
   getEquipmentSpeedMultiplier,
   getMaxQueueCapacity,
   getPlayerQualityScore,
@@ -14,10 +19,13 @@ import {
   getSiteLayout,
 } from '../config/worldLayout';
 import type {
+  ActiveCityEvent,
+  CityEventId,
   CompetitorState,
   EconomyMetrics,
   FloatingPopup,
   OwnerSide,
+  ToastNotification,
   UpgradeLevels,
   Vec3,
   VehicleEntity,
@@ -25,6 +33,7 @@ import type {
   WorkerProfile,
   WorkerRuntime,
 } from '../types/game';
+import { formatRub } from '../utils/currency';
 import { buildSmoothPath, distanceXZ, lerpAngle, normalizeAngle } from './pathing';
 
 export interface SimulationCallbacks {
@@ -36,7 +45,14 @@ export interface SimulationCallbacks {
   getTimeOfDay: () => number;
   getTimeMode: () => string;
   getShowPopups: () => boolean;
-  onPlayerWashComplete: (payment: number, repDelta: number, workerId: string | null) => void;
+  getActiveEvent: () => ActiveCityEvent | null;
+  getStarted: () => boolean;
+  onPlayerWashComplete: (
+    payment: number,
+    repDelta: number,
+    workerId: string | null,
+    isVip: boolean
+  ) => void;
   onPlayerCarLost: (repDelta: number) => void;
   onCompetitorWashComplete: (payment: number) => void;
   onEconomyMinuteTick: (
@@ -46,9 +62,19 @@ export interface SimulationCallbacks {
     playerMinuteRev: number,
     compMinuteRev: number
   ) => void;
-  onTimeAdvance: (newTimeOfDay: number, dayDelta: number, minuteDelta: number) => void;
+  onTimeAdvance: (newTimeOfDay: number, dayDelta: number, minuteDelta: number, dtSec: number) => void;
   onCompetitorUpdate: (patch: Partial<CompetitorState>) => void;
+  onCityEventUpdate: (event: ActiveCityEvent | null) => void;
+  onToast: (title: string, subtitle: string | undefined, tone: ToastNotification['tone']) => void;
   onEntityListChanged: () => void;
+}
+
+export interface SplashBurst {
+  x: number;
+  y: number;
+  z: number;
+  createdAt: number;
+  isVip?: boolean;
 }
 
 class GameSimulation {
@@ -56,9 +82,11 @@ class GameSimulation {
   public workerRuntimes: Map<string, WorkerRuntime> = new Map();
   public competitorWorkers: WorkerProfile[] = createCompetitorWorkers(2);
   public popups: FloatingPopup[] = [];
+  public pendingBursts: SplashBurst[] = [];
 
   private callbacks: SimulationCallbacks | null = null;
-  private spawnTimer = 1.2;
+  private spawnTimer = 1.0;
+  private eventCooldown = 28;
   private minuteAccumulator = 0;
   private minutePlayerRev = 0;
   private minuteCompRev = 0;
@@ -79,8 +107,10 @@ class GameSimulation {
     this.vehicles = [];
     this.workerRuntimes.clear();
     this.popups = [];
+    this.pendingBursts = [];
     this.competitorWorkers = createCompetitorWorkers(2);
-    this.spawnTimer = 1.0;
+    this.spawnTimer = 0.8;
+    this.eventCooldown = 30;
     this.minuteAccumulator = 0;
     this.minutePlayerRev = 0;
     this.minuteCompRev = 0;
@@ -100,10 +130,9 @@ class GameSimulation {
    */
   private seedInitialLiveTraffic(): void {
     if (!this.callbacks) return;
-    // Start with cars already arriving at lot entrance on both AUTOMOIKA and TURBO SHINE
-    this.spawnCustomerVehicle('player', 0.85);
-    this.spawnCustomerVehicle('competitor', 0.85);
-    this.spawnCustomerVehicle('player', 0.25);
+    this.spawnCustomerVehicle('player', 0.85, false);
+    this.spawnCustomerVehicle('competitor', 0.85, false);
+    this.spawnCustomerVehicle('player', 0.35, false);
     this.callbacks.onEntityListChanged();
   }
 
@@ -112,7 +141,6 @@ class GameSimulation {
     const playerWorkers = this.callbacks.getPlayerWorkers();
     const comp = this.callbacks.getCompetitor();
 
-    // Ensure competitor worker count matches competitor bays
     if (this.competitorWorkers.length !== comp.bays) {
       this.competitorWorkers = createCompetitorWorkers(comp.bays);
     }
@@ -120,21 +148,17 @@ class GameSimulation {
     const allProfiles = [...playerWorkers, ...this.competitorWorkers];
     const validIds = new Set(allProfiles.map((w) => w.id));
 
-    // Remove deleted workers
-    for (const [id, rt] of this.workerRuntimes.entries()) {
+    for (const [id] of this.workerRuntimes.entries()) {
       if (!validIds.has(id)) {
-        // Release any vehicle assigned to fired worker
         for (const v of this.vehicles) {
           if (v.assignedWorkerId === id) {
             v.assignedWorkerId = null;
           }
         }
         this.workerRuntimes.delete(id);
-        void rt;
       }
     }
 
-    // Add missing worker runtimes
     allProfiles.forEach((profile, index) => {
       if (!this.workerRuntimes.has(profile.id)) {
         const layout = getSiteLayout(profile.owner);
@@ -184,6 +208,15 @@ class GameSimulation {
     return 'washing';
   }
 
+  public getBayVehicle(owner: OwnerSide, bayIndex: number): VehicleEntity | undefined {
+    return this.vehicles.find(
+      (car) =>
+        car.owner === owner &&
+        car.bayIndex === bayIndex &&
+        car.state === 'washing'
+    );
+  }
+
   public getQueueCount(owner: OwnerSide): number {
     return this.vehicles.filter(
       (v) => v.owner === owner && (v.state === 'queued' || v.state === 'entering')
@@ -212,24 +245,56 @@ class GameSimulation {
     const queueLen = this.getQueueCount(owner);
     if (owner === 'player') {
       const quality = getPlayerQualityScore(upgrades);
-      const priceFactor = Math.max(0.25, 2.35 - (eco.washPrice - 15) * 0.032);
-      const repFactor = 0.7 + eco.reputation * 0.45;
-      const qualityFactor = 0.7 + quality * 0.35;
+      const effectivePrice = eco.happyHourRemaining > 0 ? eco.washPrice * 0.85 : eco.washPrice;
+      const priceFactor = Math.max(0.22, 2.45 - ((effectivePrice - 600) / 1000) * 0.92);
+      const repFactor = 0.72 + eco.reputation * 0.45;
+      const qualityFactor = 0.72 + quality * 0.36;
       const adBoost = AD_CAMPAIGNS[eco.adCampaign].demandBoost;
-      const queuePenalty = Math.max(0.25, 1 - queueLen * (0.11 - (upgrades.vipLounge - 1) * 0.018));
-      return Math.max(0.2, (priceFactor + repFactor + qualityFactor + adBoost) * queuePenalty);
+      const happyBoost = eco.happyHourRemaining > 0 ? 1.15 : 0;
+      const queuePenalty = Math.max(
+        0.28,
+        1 - queueLen * (0.105 - (upgrades.vipLounge - 1) * 0.018)
+      );
+      return Math.max(
+        0.2,
+        (priceFactor + repFactor + qualityFactor + adBoost + happyBoost) * queuePenalty
+      );
     } else {
       const effectivePrice = comp.promoActive ? comp.price * 0.82 : comp.price;
-      const priceFactor = Math.max(0.25, 2.35 - (effectivePrice - 15) * 0.032);
-      const repFactor = 0.7 + comp.reputation * 0.45;
-      const qualityFactor = 0.7 + comp.quality * 0.35;
-      const queuePenalty = Math.max(0.25, 1 - queueLen * 0.12);
+      const priceFactor = Math.max(0.22, 2.45 - ((effectivePrice - 600) / 1000) * 0.92);
+      const repFactor = 0.72 + comp.reputation * 0.45;
+      const qualityFactor = 0.72 + comp.quality * 0.36;
+      const queuePenalty = Math.max(0.28, 1 - queueLen * 0.12);
       return Math.max(0.2, (priceFactor + repFactor + qualityFactor) * queuePenalty);
     }
   }
 
+  /**
+   * Interactive hands-on turbo wash boost triggered by the player!
+   */
+  public boostVehicleWash(vehicleId: string): boolean {
+    const car = this.vehicles.find((v) => v.id === vehicleId);
+    if (!car || car.owner !== 'player' || car.state !== 'washing') return false;
+    const now = performance.now();
+    if (now - car.lastBoostAt < 900) return false;
+
+    car.lastBoostAt = now;
+    car.washProgress = Math.min(0.99, car.washProgress + 0.15);
+    car.sparkleTimer = Math.max(car.sparkleTimer, 0.9);
+    this.pendingBursts.push({
+      x: car.x,
+      y: 1.1,
+      z: car.z,
+      createdAt: now,
+      isVip: car.isVip,
+    });
+    soundEngine.playTurboSplash();
+    this.addPopup(car.x, 2.55, car.z, '⚡ ТУРБО +15%', '#00D4FF');
+    return true;
+  }
+
   public addPopup(x: number, y: number, z: number, text: string, color: string): void {
-    if (!this.callbacks || !this.callbacks.getShowPopups()) return;
+    if (!this.callbacks || !this.callbacks.getShowPopups() || !this.callbacks.getStarted()) return;
     this.popups.push({
       id: `pop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       x,
@@ -240,7 +305,7 @@ class GameSimulation {
       createdAt: performance.now(),
       duration: 1850,
     });
-    if (this.popups.length > 18) {
+    if (this.popups.length > 16) {
       this.popups.shift();
     }
   }
@@ -254,8 +319,8 @@ class GameSimulation {
 
     // 1. Advance time of day & in-game clock
     const timeMode = this.callbacks.getTimeMode();
-    // Full day cycle = 240 real seconds at 1x speed
-    const timeAdvance = timeMode === 'cycle' ? dt / 240 : 0;
+    // Full day cycle = 280 real seconds at 1x speed (gives longer sunny/golden windows!)
+    const timeAdvance = timeMode === 'cycle' ? dt / 280 : 0;
     let nextTime = this.callbacks.getTimeOfDay() + timeAdvance;
     let dayDelta = 0;
     if (nextTime >= 1) {
@@ -263,32 +328,74 @@ class GameSimulation {
       dayDelta = 1;
     }
     const minuteDelta = dt / 60;
-    this.callbacks.onTimeAdvance(nextTime, dayDelta, minuteDelta);
+    this.callbacks.onTimeAdvance(nextTime, dayDelta, minuteDelta, dt);
 
-    // 2. Competitor autonomous evolution & promotions
+    // 2. Dynamic City Events (only while actively playing)
+    if (this.callbacks.getStarted()) {
+      this.stepCityEvents(dt);
+    }
+
+    // 3. Competitor autonomous evolution & promotions
     this.stepCompetitorAI(dt);
 
-    // 3. Vehicle spawning based on total city demand + advertising
+    // 4. Vehicle spawning based on total city demand + advertising + events
     this.stepSpawner(dt);
 
-    // 4. Queue advancement & bay dispatching
+    // 5. Queue advancement & bay dispatching
     this.stepSiteDispatch('player');
     this.stepSiteDispatch('competitor');
 
-    // 5. Vehicle movement, washing progression & cleanup
+    // 6. Vehicle movement, washing progression & cleanup
     this.stepVehicles(dt);
 
-    // 6. Worker AI & animations
+    // 7. Worker AI & animations
     this.stepWorkers(dt);
 
-    // 7. Economy minute tick (every 12 real seconds = 1 financial tick scaled to per-minute,
-    //    or smooth 15-second billing cycles so player sees expenses clearly!)
+    // 8. Economy billing cycle (every 15 seconds)
     this.stepEconomyBilling(dt);
 
-    // 8. Prune expired floating popups
+    // 9. Prune expired popups & splash bursts
     const nowMs = performance.now();
     if (this.popups.length > 0) {
       this.popups = this.popups.filter((p) => nowMs - p.createdAt < p.duration);
+    }
+    if (this.pendingBursts.length > 0) {
+      this.pendingBursts = this.pendingBursts.filter((b) => nowMs - b.createdAt < 400);
+    }
+  }
+
+  private stepCityEvents(dt: number): void {
+    if (!this.callbacks) return;
+    const active = this.callbacks.getActiveEvent();
+    if (active) {
+      const rem = active.remainingSec - dt;
+      if (rem <= 0) {
+        this.callbacks.onCityEventUpdate(null);
+        this.eventCooldown = 55 + Math.random() * 35;
+      } else {
+        this.callbacks.onCityEventUpdate({ ...active, remainingSec: rem });
+      }
+      return;
+    }
+
+    this.eventCooldown -= dt;
+    if (this.eventCooldown <= 0) {
+      const pool: CityEventId[] = ['rain_aftermath', 'rush_hour', 'car_blogger', 'vip_convoy'];
+      const chosenId = pool[Math.floor(Math.random() * pool.length)];
+      const spec = CITY_EVENTS[chosenId];
+      this.callbacks.onCityEventUpdate({
+        id: chosenId,
+        remainingSec: spec.duration,
+        totalSec: spec.duration,
+      });
+      soundEngine.playFanfare();
+      this.callbacks.onToast(spec.title, spec.subtitle, chosenId === 'vip_convoy' ? 'vip' : 'cyan');
+
+      // Immediately dispatch a VIP guest if VIP convoy starts!
+      if (chosenId === 'vip_convoy' && this.vehicles.length < 16) {
+        this.spawnCustomerVehicle('player', 0.15, true);
+        this.callbacks.onEntityListChanged();
+      }
     }
   }
 
@@ -297,28 +404,34 @@ class GameSimulation {
     const comp = this.callbacks.getCompetitor();
     const day = this.callbacks.getDay();
 
-    // Competitor occasionally runs a flash discount promo for 35 seconds
     let promoActive = comp.promoActive;
     let promoTimer = comp.promoTimer - dt;
     if (promoTimer <= 0) {
       if (promoActive) {
         promoActive = false;
-        promoTimer = 70 + Math.random() * 55;
-      } else if (Math.random() < 0.45) {
+        promoTimer = 75 + Math.random() * 55;
+      } else if (Math.random() < 0.48) {
         promoActive = true;
-        promoTimer = 32;
+        promoTimer = 34;
+        if (this.callbacks.getStarted()) {
+          this.callbacks.onToast(
+            'TURBO SHINE запустил скидку -18%!',
+            'Включите «Счастливый час» или рекламу, чтобы удержать клиентов.',
+            'coral'
+          );
+        }
       } else {
-        promoTimer = 50;
+        promoTimer = 52;
       }
       this.callbacks.onCompetitorUpdate({ promoActive, promoTimer });
     } else {
       comp.promoTimer = promoTimer;
     }
 
-    // Competitor gradually upgrades on Day 3+ if player is growing
+    // Competitor gradually upgrades on Day 3+
     if (day >= 3 && comp.lastUpgradeDay < day) {
       const nextBays = day >= 5 ? 3 : comp.bays;
-      const nextQuality = Math.min(4.2, +(comp.quality + 0.15).toFixed(2));
+      const nextQuality = Math.min(4.2, +(comp.quality + 0.14).toFixed(2));
       const nextSpeed = Math.min(1.55, +(comp.speedMultiplier + 0.05).toFixed(2));
       this.callbacks.onCompetitorUpdate({
         bays: nextBays,
@@ -333,18 +446,19 @@ class GameSimulation {
     if (!this.callbacks) return;
     const eco = this.callbacks.getEconomy();
     const upgrades = this.callbacks.getUpgrades();
-    const comp = this.callbacks.getCompetitor();
+    const activeEvent = this.callbacks.getActiveEvent();
 
     const adSpec = AD_CAMPAIGNS[eco.adCampaign];
-    const baseInterval = 4.2 / adSpec.trafficMultiplier;
-    const bayBonus = Math.max(0.65, 1 - (upgrades.bays - 1) * 0.11);
-    const targetInterval = Math.max(1.8, baseInterval * bayBonus);
+    const eventTraffic = activeEvent ? CITY_EVENTS[activeEvent.id].trafficMultiplier : 1.0;
+    const happyTraffic = eco.happyHourRemaining > 0 ? 1.35 : 1.0;
+    const baseInterval = 3.9 / (adSpec.trafficMultiplier * eventTraffic * happyTraffic);
+    const bayBonus = Math.max(0.62, 1 - (upgrades.bays - 1) * 0.12);
+    const targetInterval = Math.max(1.55, baseInterval * bayBonus);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer > 0) return;
-    this.spawnTimer = targetInterval * (0.75 + Math.random() * 0.5);
+    this.spawnTimer = targetInterval * (0.75 + Math.random() * 0.48);
 
-    // Cap total active customer cars to keep scene crisp and performant
     if (this.vehicles.length >= 16) return;
 
     const playerShare = this.getPlayerAttractionShare();
@@ -354,7 +468,6 @@ class GameSimulation {
     const playerQ = this.getQueueCount('player');
     const compQ = this.getQueueCount('competitor');
 
-    // If chosen side's queue is full, consider rival or bail out
     if (chosenSide === 'player' && playerQ >= playerMaxQ) {
       if (compQ < 5) {
         chosenSide = 'competitor';
@@ -369,7 +482,6 @@ class GameSimulation {
       }
     }
 
-    // Avoid spawning overlapping a car still near spawn point
     const layout = getSiteLayout(chosenSide);
     const tooClose = this.vehicles.some(
       (v) =>
@@ -378,23 +490,60 @@ class GameSimulation {
     );
     if (tooClose) return;
 
-    this.spawnCustomerVehicle(chosenSide, 0);
+    // VIP roll for player side!
+    let isVip = false;
+    if (chosenSide === 'player' && this.callbacks.getStarted()) {
+      const vipChance =
+        0.065 +
+        Math.max(0, eco.reputation - 3.4) * 0.045 +
+        (eco.adCampaign === 'radio' ? 0.05 : 0) +
+        (activeEvent ? CITY_EVENTS[activeEvent.id].vipChanceBonus : 0);
+      if (Math.random() < vipChance) {
+        isVip = true;
+      }
+    }
+
+    this.spawnCustomerVehicle(chosenSide, 0, isVip);
     if (chosenSide === 'player') {
       soundEngine.playCarArrival();
+      if (isVip) {
+        soundEngine.playFanfare();
+        this.callbacks.onToast(
+          '⭐ VIP-клиент на подъезде!',
+          'Обслужите без задержек — тройная оплата и рост рейтинга!',
+          'vip'
+        );
+      }
     }
     this.callbacks.onEntityListChanged();
-    void comp;
   }
 
-  private spawnCustomerVehicle(owner: OwnerSide, startProgress: number): void {
+  private spawnCustomerVehicle(owner: OwnerSide, startProgress: number, isVip: boolean): void {
     if (!this.callbacks) return;
     const eco = this.callbacks.getEconomy();
     const comp = this.callbacks.getCompetitor();
+    const activeEvent = this.callbacks.getActiveEvent();
     const layout = getSiteLayout(owner);
 
-    const rep = owner === 'player' ? eco.reputation : comp.reputation;
+    const rep = owner === 'player' ? (isVip ? 5.0 : eco.reputation) : comp.reputation;
     const picked = pickVehicleForReputation(rep);
-    const spec = VEHICLE_SPECS[picked.category];
+
+    // VIP cars always drive luxury / sports vehicles with golden accent!
+    const category = isVip
+      ? (Math.random() < 0.55 ? 'premium' : 'sports')
+      : picked.category;
+    const spec = VEHICLE_SPECS[category];
+    const modelName = isVip
+      ? spec.models[Math.floor(Math.random() * spec.models.length)] ?? 'Maybach VIP'
+      : picked.modelName;
+    const appearance = isVip
+      ? {
+          primaryColor: Math.random() < 0.5 ? '#121624' : '#F8FAFC',
+          accentColor: '#FACC15',
+          rimColor: '#FDE047',
+          dirtSeed: Math.random() * 1000,
+        }
+      : picked.appearance;
 
     const rawApproach: Vec3[] = [
       layout.spawnPoint,
@@ -403,7 +552,6 @@ class GameSimulation {
     ];
     const smoothApproach = buildSmoothPath(rawApproach, 2.8);
 
-    // Optional jump ahead for initial world seeding
     const startIdx = Math.min(
       smoothApproach.length - 2,
       Math.floor(startProgress * (smoothApproach.length - 1))
@@ -412,16 +560,27 @@ class GameSimulation {
     const nextPt = smoothApproach[startIdx + 1] ?? layout.lotEntryPoint;
     const initialYaw = Math.atan2(nextPt.x - startPt.x, nextPt.z - startPt.z);
 
-    const basePrice = owner === 'player' ? eco.washPrice : (comp.promoActive ? comp.price * 0.82 : comp.price);
-    const expectedPrice = Math.round(basePrice * spec.priceMultiplier);
+    const basePrice =
+      owner === 'player'
+        ? eco.happyHourRemaining > 0
+          ? eco.washPrice * 0.85
+          : eco.washPrice
+        : comp.promoActive
+          ? comp.price * 0.82
+          : comp.price;
+    const vipMult = isVip ? 2.35 : 1.0;
+    const expectedPrice = Math.round((basePrice * spec.priceMultiplier * vipMult) / 10) * 10;
+    const rainDirt = activeEvent?.id === 'rain_aftermath' ? 1.0 : 0.82 + Math.random() * 0.18;
 
     this.entityCounter += 1;
     const car: VehicleEntity = {
       id: `car-${owner[0]}-${this.entityCounter}`,
       owner,
-      category: picked.category,
-      modelName: picked.modelName,
-      appearance: picked.appearance,
+      category,
+      modelName: isVip ? `VIP ${modelName}` : modelName,
+      appearance,
+      isVip,
+      lastBoostAt: 0,
       state: 'approaching',
       washStage: 'none',
       x: startPt.x,
@@ -432,7 +591,7 @@ class GameSimulation {
       steerAngle: 0,
       wheelSpin: 0,
       braking: false,
-      dirtLevel: 0.82 + Math.random() * 0.18,
+      dirtLevel: rainDirt,
       foamLevel: 0,
       washProgress: 0,
       patience: 1.0,
@@ -442,7 +601,7 @@ class GameSimulation {
       waypoints: smoothApproach,
       waypointIndex: startIdx + 1,
       expectedPrice,
-      washDuration: spec.baseWashSeconds,
+      washDuration: spec.baseWashSeconds * (isVip ? 0.92 : 1),
       spawnTime: performance.now(),
       sparkleTimer: 0,
     };
@@ -459,7 +618,6 @@ class GameSimulation {
     const workers =
       owner === 'player' ? this.callbacks.getPlayerWorkers() : this.competitorWorkers;
 
-    // 1. Compact queue slots so cars move forward cleanly when slot ahead opens
     const queuedCars = this.vehicles
       .filter((v) => v.owner === owner && (v.state === 'entering' || v.state === 'queued'))
       .sort((a, b) => {
@@ -472,10 +630,7 @@ class GameSimulation {
       if (car.queueSlot !== targetSlot && targetSlot < layout.queueSlots.length) {
         car.queueSlot = targetSlot;
         const slotPos = layout.queueSlots[targetSlot];
-        car.waypoints = buildSmoothPath(
-          [{ x: car.x, y: 0, z: car.z }, slotPos],
-          1.4
-        );
+        car.waypoints = buildSmoothPath([{ x: car.x, y: 0, z: car.z }, slotPos], 1.4);
         car.waypointIndex = 1;
         if (car.state === 'queued') {
           car.state = 'entering';
@@ -483,7 +638,6 @@ class GameSimulation {
       }
     });
 
-    // 2. Dispatch front queued car into any free bay that has an available worker
     const frontCar = queuedCars.find(
       (c) =>
         c.queueSlot === 0 &&
@@ -501,7 +655,6 @@ class GameSimulation {
       );
       if (bayOccupied) continue;
 
-      // Find an idle worker eligible for this bay
       const worker = this.findAvailableWorker(workers, bayIdx);
       if (!worker) continue;
 
@@ -523,7 +676,6 @@ class GameSimulation {
       );
       frontCar.waypointIndex = 1;
 
-      // Direct worker to greet car at bay entrance
       const rt = this.workerRuntimes.get(worker.id);
       if (rt) {
         const greetPt = getBayGreetingPoint(owner, bayIdx);
@@ -540,13 +692,11 @@ class GameSimulation {
   }
 
   private findAvailableWorker(workers: WorkerProfile[], bayIdx: number): WorkerProfile | null {
-    // Priority 1: worker explicitly assigned to this bay
     for (const w of workers) {
       if (w.assignedBay !== bayIdx) continue;
       const rt = this.workerRuntimes.get(w.id);
       if (rt && !rt.activeVehicleId) return w;
     }
-    // Priority 2: auto-assigned worker (-1)
     for (const w of workers) {
       if (w.assignedBay !== -1) continue;
       const rt = this.workerRuntimes.get(w.id);
@@ -578,16 +728,14 @@ class GameSimulation {
         const layout = getSiteLayout(car.owner);
         car.rotationY = lerpAngle(car.rotationY, layout.queueCarRotationY, dt * 6);
 
-        // Patience drain while waiting in queue
         const patienceRate =
           car.owner === 'player'
-            ? 0.011 / (1 + (upgrades.vipLounge - 1) * 0.28)
+            ? 0.0105 / (1 + (upgrades.vipLounge - 1) * 0.28)
             : 0.013;
         car.patience = Math.max(0, car.patience - patienceRate * dt);
         if (car.patience <= 0) {
-          // Customer got tired of waiting and drives away!
           if (car.owner === 'player') {
-            this.callbacks.onPlayerCarLost(-0.08);
+            this.callbacks.onPlayerCarLost(car.isVip ? -0.12 : -0.07);
             this.addPopup(car.x, 2.4, car.z, 'Уехал (очередь)', '#FF3B5C');
           }
           this.sendCarToExit(car, true);
@@ -595,7 +743,6 @@ class GameSimulation {
         continue;
       }
 
-      // Movement along waypoints
       const target = car.waypoints[car.waypointIndex];
       if (!target) {
         this.handlePathFinished(car, toRemove);
@@ -605,20 +752,17 @@ class GameSimulation {
       const dist = distanceXZ(car.x, car.z, target.x, target.z);
       const isFinalWp = car.waypointIndex >= car.waypoints.length - 1;
 
-      // Determine cruising speed based on state
       let desiredSpeed =
         car.state === 'approaching' || car.state === 'leaving'
-          ? 10.5
+          ? 10.8
           : car.state === 'moving_to_bay' || car.state === 'entering'
-            ? 5.0
-            : 6.5;
+            ? 5.2
+            : 6.8;
 
-      // Smoothly slow down near final stop (queue slot or wash bay)
       if (isFinalWp && (car.state === 'entering' || car.state === 'moving_to_bay')) {
         desiredSpeed = Math.min(desiredSpeed, Math.max(1.2, dist * 1.4));
       }
 
-      // Check car ahead in same lane to avoid bumper clipping
       const blockedAhead = this.isBlockedAhead(car);
       if (blockedAhead) {
         desiredSpeed = 0;
@@ -680,9 +824,7 @@ class GameSimulation {
       if (d > 5.4 || d < 0.01) continue;
 
       const dot = (dx / d) * fx + (dz / d) * fz;
-      // Only brake if other car is directly in front cone
       if (dot > 0.72) {
-        // Avoid deadlock between two cars facing opposite directions
         const headingDot =
           Math.sin(car.rotationY) * Math.sin(other.rotationY) +
           Math.cos(car.rotationY) * Math.cos(other.rotationY);
@@ -698,7 +840,6 @@ class GameSimulation {
     const layout = getSiteLayout(car.owner);
 
     if (car.state === 'approaching') {
-      // Join queue
       const maxQ =
         car.owner === 'player'
           ? getMaxQueueCapacity(this.callbacks!.getUpgrades().queueLot)
@@ -776,11 +917,13 @@ class GameSimulation {
   ): void {
     if (!this.callbacks) return;
     const layout = getSiteLayout(car.owner);
+    const eco = this.callbacks.getEconomy();
+    const activeEvent = this.callbacks.getActiveEvent();
+
     car.rotationY = lerpAngle(car.rotationY, layout.bayCarRotationY, dt * 8);
     car.speed = 0;
     car.braking = true;
 
-    // Ensure a worker is actively attached (in case player fired one mid-wash)
     if (!car.assignedWorkerId || !this.workerRuntimes.has(car.assignedWorkerId)) {
       const workers =
         car.owner === 'player' ? this.callbacks.getPlayerWorkers() : this.competitorWorkers;
@@ -793,7 +936,6 @@ class GameSimulation {
           rt.activeVehicleId = car.id;
         }
       } else {
-        // Wait until a worker becomes free
         return;
       }
     }
@@ -802,76 +944,95 @@ class GameSimulation {
     const workerSpeed = workerProfile ? workerProfile.speed * workerProfile.morale : 1.0;
     const equipSpeed =
       car.owner === 'player'
-        ? getEquipmentSpeedMultiplier(upgrades)
+        ? getEquipmentSpeedMultiplier(upgrades) * (eco.happyHourRemaining > 0 ? 1.25 : 1.0)
         : comp.speedMultiplier;
 
-    const totalRate = (workerSpeed * equipSpeed) / Math.max(8, car.washDuration);
+    const totalRate = (workerSpeed * equipSpeed) / Math.max(7.5, car.washDuration);
     car.washProgress = Math.min(1, car.washProgress + totalRate * dt);
 
-    // Determine detailed wash stage & update realistic dirt/foam curves
     let stage: WashStage = 'greeting';
     if (car.washProgress < 0.07) {
       stage = 'greeting';
     } else if (car.washProgress < 0.34) {
       stage = 'rinse';
       const local = (car.washProgress - 0.07) / 0.27;
-      car.dirtLevel = Math.max(0.72, 1.0 - local * 0.28);
+      car.dirtLevel = Math.max(0.7, 1.0 - local * 0.3);
       car.foamLevel = 0;
       if (car.owner === 'player') soundEngine.playWashStageSound('rinse');
     } else if (car.washProgress < 0.62) {
       stage = 'foam';
       const local = (car.washProgress - 0.34) / 0.28;
-      car.foamLevel = Math.min(1.0, local * 1.15);
-      car.dirtLevel = Math.max(0.55, 0.72 - local * 0.17);
+      car.foamLevel = Math.min(1.0, local * 1.18);
+      car.dirtLevel = Math.max(0.52, 0.7 - local * 0.18);
       if (car.owner === 'player') soundEngine.playWashStageSound('foam');
     } else if (car.washProgress < 0.86) {
       stage = 'scrub';
       const local = (car.washProgress - 0.62) / 0.24;
-      car.dirtLevel = Math.max(0.06, 0.55 * (1 - local));
-      car.foamLevel = Math.max(0.12, 1.0 - local * 0.88);
+      car.dirtLevel = Math.max(0.05, 0.52 * (1 - local));
+      car.foamLevel = Math.max(0.1, 1.0 - local * 0.9);
       if (car.owner === 'player') soundEngine.playWashStageSound('scrub');
     } else {
       stage = 'dry';
       const local = (car.washProgress - 0.86) / 0.14;
-      car.dirtLevel = Math.max(0, 0.06 * (1 - local));
-      car.foamLevel = Math.max(0, 0.12 * (1 - local));
+      car.dirtLevel = Math.max(0, 0.05 * (1 - local));
+      car.foamLevel = Math.max(0, 0.1 * (1 - local));
       if (car.owner === 'player') soundEngine.playWashStageSound('dry');
     }
     car.washStage = stage;
 
-    // Wash finished!
     if (car.washProgress >= 1) {
       car.washStage = 'done';
       car.dirtLevel = 0;
       car.foamLevel = 0;
-      car.sparkleTimer = 3.2;
+      car.sparkleTimer = car.isVip ? 4.5 : 3.4;
 
       const workerQuality = workerProfile ? workerProfile.quality : 1.0;
 
       if (car.owner === 'player') {
         const foamTip = 1 + (upgrades.foamSystem - 1) * 0.14;
-        const waxBonus = (upgrades.dryerWax - 1) * 4;
-        const loungeTip = (upgrades.vipLounge - 1) * 2.5;
-        const payment = Math.round(
-          car.expectedPrice * (0.85 + workerQuality * 0.18) * foamTip + waxBonus + loungeTip
-        );
-        const repGain = +(0.025 + (upgrades.foamSystem + upgrades.vipLounge - 2) * 0.006).toFixed(3);
-        const utilityForWash = Math.round(3.5 * getUtilityDiscount(upgrades.ecoSolar));
+        const waxBonus = (upgrades.dryerWax - 1) * WAX_BONUS_PER_LEVEL;
+        const loungeTip = (upgrades.vipLounge - 1) * LOUNGE_TIP_PER_LEVEL;
+        const comboBonus = 1 + Math.min(0.5, Math.floor((eco.combo + 1) / 2) * 0.05);
+        const eventTip = activeEvent ? CITY_EVENTS[activeEvent.id].tipMultiplier : 1.0;
+        const eventRep = activeEvent ? CITY_EVENTS[activeEvent.id].repMultiplier : 1.0;
+
+        const rawPayment =
+          (car.expectedPrice * (0.86 + workerQuality * 0.18) * foamTip + waxBonus + loungeTip) *
+          comboBonus *
+          eventTip;
+        const payment = Math.round(rawPayment / 10) * 10;
+
+        const baseRep =
+          (car.isVip ? 0.11 : 0.028) + (upgrades.foamSystem + upgrades.vipLounge - 2) * 0.006;
+        const repGain = +(baseRep * eventRep).toFixed(3);
+        const utilityForWash = Math.round(WASH_UTILITY_COST * getUtilityDiscount(upgrades.ecoSolar));
 
         this.minutePlayerRev += payment;
         this.minutePlayerUtility += utilityForWash;
 
-        this.callbacks.onPlayerWashComplete(payment, repGain, car.assignedWorkerId);
-        soundEngine.playCash();
-        this.addPopup(car.x, 2.7, car.z, `+$${payment}`, '#22C55E');
+        this.callbacks.onPlayerWashComplete(payment, repGain, car.assignedWorkerId, car.isVip);
+
+        if (car.isVip) {
+          soundEngine.playFanfare();
+          this.pendingBursts.push({
+            x: car.x,
+            y: 1.4,
+            z: car.z,
+            createdAt: performance.now(),
+            isVip: true,
+          });
+          this.addPopup(car.x, 2.85, car.z, `⭐ VIP ${formatRub(payment, { signed: true })}`, '#FACC15');
+        } else {
+          soundEngine.playCash();
+          this.addPopup(car.x, 2.7, car.z, formatRub(payment, { signed: true }), '#22C55E');
+        }
       } else {
-        const payment = Math.round(car.expectedPrice * (0.95 + comp.quality * 0.05));
+        const payment = Math.round((car.expectedPrice * (0.95 + comp.quality * 0.05)) / 10) * 10;
         this.minuteCompRev += payment;
         this.callbacks.onCompetitorWashComplete(payment);
-        this.addPopup(car.x, 2.6, car.z, `+$${payment}`, '#FF9F43');
+        this.addPopup(car.x, 2.6, car.z, formatRub(payment, { signed: true }), '#FF9F43');
       }
 
-      // Free the worker with brief celebrate state
       if (car.assignedWorkerId) {
         const rt = this.workerRuntimes.get(car.assignedWorkerId);
         if (rt) {
@@ -932,7 +1093,6 @@ class GameSimulation {
 
       rt.animPhase += dt * (4.2 + profile.speed * 1.4);
 
-      // Brief celebration after finishing a car
       if (rt.action === 'celebrating') {
         rt.patrolTimer -= dt;
         if (rt.patrolTimer <= 0) {
@@ -946,7 +1106,6 @@ class GameSimulation {
         : undefined;
 
       if (!activeCar || activeCar.state === 'exiting' || activeCar.state === 'leaving') {
-        // Walk back to rest stand near assigned or default bay
         rt.activeVehicleId = null;
         rt.activeBay = -1;
         rt.sprayTarget = null;
@@ -968,7 +1127,6 @@ class GameSimulation {
         return;
       }
 
-      // Car is driving into bay: stand at greeting point and wave
       if (activeCar.state === 'moving_to_bay') {
         const greetPt = getBayGreetingPoint(rt.owner, activeCar.bayIndex);
         const d = distanceXZ(rt.x, rt.z, greetPt.x, greetPt.z);
@@ -984,7 +1142,6 @@ class GameSimulation {
         return;
       }
 
-      // Car is parked inside bay — patrol smoothly around all 4 sides!
       if (activeCar.state === 'washing') {
         const patrol = getBayPatrolPoints(rt.owner, activeCar.bayIndex);
         if (activeCar.washStage === 'greeting') {
@@ -1015,21 +1172,17 @@ class GameSimulation {
                 : 'drying';
 
         if (d > 0.32) {
-          // Walk around car toward next side panel
           rt.action = 'walking';
           this.moveWorkerToward(rt, wp.x, wp.z, 2.8 * profile.speed, dt);
-          // Keep spraying slightly while strafing during rinse/foam!
           rt.sprayTarget =
             stageAction === 'rinsing' || stageAction === 'foaming'
               ? { x: activeCar.x, y: 0.95, z: activeCar.z }
               : null;
         } else {
-          // Work actively on this panel for ~1.1s then move to next side!
           rt.action = stageAction;
           const lookYaw = Math.atan2(activeCar.x - rt.x, activeCar.z - rt.z);
           rt.rotationY = lerpAngle(rt.rotationY, lookYaw, dt * 8);
 
-          // Aim water/foam stream smoothly sweeping across car panels
           const sweep = Math.sin(rt.animPhase * 1.4) * 0.65;
           const perpX = Math.cos(lookYaw) * sweep;
           const perpZ = -Math.sin(lookYaw) * sweep;
@@ -1070,7 +1223,6 @@ class GameSimulation {
   private stepEconomyBilling(dt: number): void {
     if (!this.callbacks) return;
     this.minuteAccumulator += dt;
-    // Settle financial cycle every 15 seconds (scaled cleanly to per-minute rates!)
     const CYCLE_SECONDS = 15;
     if (this.minuteAccumulator < CYCLE_SECONDS) return;
 
@@ -1083,7 +1235,8 @@ class GameSimulation {
 
     const salaryPerMin = workers.reduce((sum, w) => sum + w.salaryPerMin, 0);
     const adCostPerMin = AD_CAMPAIGNS[eco.adCampaign].costPerMin;
-    const baseBayUtilityPerMin = upgrades.bays * 9 * getUtilityDiscount(upgrades.ecoSolar);
+    const baseBayUtilityPerMin =
+      upgrades.bays * BAY_UTILITY_PER_MIN * getUtilityDiscount(upgrades.ecoSolar);
 
     const salaryCharge = Math.round(salaryPerMin * fractionOfMinute);
     const adCharge = Math.round(adCostPerMin * fractionOfMinute);

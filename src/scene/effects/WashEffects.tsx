@@ -17,9 +17,10 @@ interface Particle {
   size: number;
 }
 
-const WATER_COUNT = 180;
-const FOAM_COUNT = 120;
-const SPARKLE_COUNT = 70;
+const WATER_COUNT = 220;
+const FOAM_COUNT = 140;
+const SPARKLE_COUNT = 95;
+const BEAM_COUNT = 10;
 
 function createPool(count: number): Particle[] {
   return Array.from({ length: count }, () => ({
@@ -40,6 +41,7 @@ export function WashEffects() {
   const waterMeshRef = useRef<THREE.InstancedMesh>(null);
   const foamMeshRef = useRef<THREE.InstancedMesh>(null);
   const sparkleMeshRef = useRef<THREE.InstancedMesh>(null);
+  const beamMeshRef = useRef<THREE.InstancedMesh>(null);
 
   const waterPool = useMemo(() => createPool(WATER_COUNT), []);
   const foamPool = useMemo(() => createPool(FOAM_COUNT), []);
@@ -48,7 +50,15 @@ export function WashEffects() {
   const waterCursor = useRef(0);
   const foamCursor = useRef(0);
   const sparkleCursor = useRef(0);
+  const processedBurstTimestamps = useRef<Set<number>>(new Set());
+
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const vecA = useMemo(() => new THREE.Vector3(), []);
+  const vecB = useMemo(() => new THREE.Vector3(), []);
+  const vecDir = useMemo(() => new THREE.Vector3(), []);
+  const upVec = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const quat = useMemo(() => new THREE.Quaternion(), []);
+  const beamColor = useMemo(() => new THREE.Color(), []);
 
   const spawnInPool = (
     pool: Particle[],
@@ -80,19 +90,89 @@ export function WashEffects() {
     const state = useGameStore.getState();
     const speedMul = state.paused ? 0 : state.simSpeed;
     const dt = Math.min(rawDt, 0.05) * Math.max(0.2, speedMul);
-    const qualityFactor = state.settings.quality === 'low' ? 0.45 : state.settings.quality === 'medium' ? 0.75 : 1.0;
+    const qualityFactor =
+      state.settings.quality === 'low' ? 0.5 : state.settings.quality === 'medium' ? 0.8 : 1.0;
+
+    // Handle dramatic Splash Bursts from Turbo-Boost clicks & VIP completions!
+    for (const burst of gameSimulation.pendingBursts) {
+      if (processedBurstTimestamps.current.has(burst.createdAt)) continue;
+      processedBurstTimestamps.current.add(burst.createdAt);
+      if (processedBurstTimestamps.current.size > 40) {
+        processedBurstTimestamps.current.clear();
+        processedBurstTimestamps.current.add(burst.createdAt);
+      }
+
+      const splashCount = Math.round(18 * qualityFactor);
+      for (let i = 0; i < splashCount; i++) {
+        const ang = (i / splashCount) * Math.PI * 2 + Math.random() * 0.4;
+        const spd = 2.0 + Math.random() * 2.8;
+        spawnInPool(
+          burst.isVip ? sparklePool : waterPool,
+          burst.isVip ? sparkleCursor : waterCursor,
+          burst.x + (Math.random() - 0.5) * 0.8,
+          burst.y + Math.random() * 0.5,
+          burst.z + (Math.random() - 0.5) * 1.2,
+          Math.cos(ang) * spd,
+          2.2 + Math.random() * 2.2,
+          Math.sin(ang) * spd,
+          0.55 + Math.random() * 0.3,
+          burst.isVip ? 0.2 : 0.12
+        );
+      }
+      for (let i = 0; i < 8; i++) {
+        spawnInPool(
+          sparklePool,
+          sparkleCursor,
+          burst.x + (Math.random() - 0.5) * 1.6,
+          burst.y + 0.5 + Math.random() * 0.8,
+          burst.z + (Math.random() - 0.5) * 2.4,
+          (Math.random() - 0.5) * 1.4,
+          1.6 + Math.random() * 1.4,
+          (Math.random() - 0.5) * 1.4,
+          0.75,
+          0.18
+        );
+      }
+    }
+
+    let beamIdx = 0;
 
     if (!state.paused) {
-      // 1. Emit pressurized water jets & snow foam from every active washing worker!
+      // 1. Emit pressurized water jets, visible spray cones & snow foam from active workers!
       for (const rt of gameSimulation.workerRuntimes.values()) {
         if (!rt.sprayTarget) continue;
         const nozzleX = rt.x + Math.sin(rt.rotationY) * 0.85;
-        const nozzleY = 1.25;
+        const nozzleY = 1.26;
         const nozzleZ = rt.z + Math.cos(rt.rotationY) * 0.85;
 
         const dx = rt.sprayTarget.x - nozzleX;
         const dy = rt.sprayTarget.y - nozzleY;
         const dz = rt.sprayTarget.z - nozzleZ;
+
+        // Visible Pressurized Spray Beam Cone!
+        if (
+          beamMeshRef.current &&
+          beamIdx < BEAM_COUNT &&
+          (rt.action === 'rinsing' || rt.action === 'foaming')
+        ) {
+          vecA.set(nozzleX, nozzleY, nozzleZ);
+          vecB.set(rt.sprayTarget.x, rt.sprayTarget.y, rt.sprayTarget.z);
+          vecDir.subVectors(vecB, vecA);
+          const dist = vecDir.length();
+          if (dist > 0.2 && dist < 5.5) {
+            dummy.position.copy(vecA).addScaledVector(vecDir, 0.5);
+            vecDir.normalize();
+            quat.setFromUnitVectors(upVec, vecDir);
+            dummy.quaternion.copy(quat);
+            const radius = rt.action === 'foaming' ? 0.16 : 0.085;
+            dummy.scale.set(radius, dist, radius);
+            dummy.updateMatrix();
+            beamMeshRef.current.setMatrixAt(beamIdx, dummy.matrix);
+            beamColor.set(rt.action === 'foaming' ? '#F0F9FF' : '#38BDF8');
+            beamMeshRef.current.setColorAt(beamIdx, beamColor);
+            beamIdx++;
+          }
+        }
 
         if (rt.action === 'rinsing') {
           const count = Math.max(1, Math.round(4 * qualityFactor));
@@ -108,11 +188,10 @@ export function WashEffects() {
               dy * 3.1 + 0.4 + (Math.random() - 0.5) * spread,
               dz * 3.1 + (Math.random() - 0.5) * spread,
               0.38 + Math.random() * 0.16,
-              0.08 + Math.random() * 0.05
+              0.085 + Math.random() * 0.05
             );
           }
-          // Splash mist bounce off the car surface
-          if (Math.random() < 0.7 * qualityFactor) {
+          if (Math.random() < 0.75 * qualityFactor) {
             spawnInPool(
               waterPool,
               waterCursor,
@@ -123,7 +202,7 @@ export function WashEffects() {
               1.4 + Math.random() * 1.4,
               (Math.random() - 0.5) * 2.2,
               0.42,
-              0.09
+              0.095
             );
           }
         } else if (rt.action === 'foaming') {
@@ -138,8 +217,8 @@ export function WashEffects() {
               dx * 2.1 + (Math.random() - 0.5) * 0.65,
               dy * 2.1 + 0.6 + (Math.random() - 0.5) * 0.5,
               dz * 2.1 + (Math.random() - 0.5) * 0.65,
-              0.72 + Math.random() * 0.35,
-              0.15 + Math.random() * 0.12
+              0.74 + Math.random() * 0.35,
+              0.16 + Math.random() * 0.12
             );
           }
         } else if (rt.action === 'scrubbing' && Math.random() < 0.55 * qualityFactor) {
@@ -158,14 +237,17 @@ export function WashEffects() {
         }
       }
 
-      // 2. Emit clean gloss sparkles on drying & newly sparkling vehicles!
+      // 2. Emit clean gloss sparkles on drying, VIP, & newly washed vehicles!
       for (const car of gameSimulation.vehicles) {
-        if ((car.washStage === 'dry' || car.sparkleTimer > 0) && Math.random() < 0.45 * qualityFactor) {
+        if (
+          (car.washStage === 'dry' || car.sparkleTimer > 0 || car.isVip) &&
+          Math.random() < (car.isVip ? 0.55 : 0.45) * qualityFactor
+        ) {
           spawnInPool(
             sparklePool,
             sparkleCursor,
             car.x + (Math.random() - 0.5) * 2.1,
-            0.85 + Math.random() * 1.1,
+            0.85 + Math.random() * 1.15,
             car.z + (Math.random() - 0.5) * 3.4,
             (Math.random() - 0.5) * 0.35,
             0.95 + Math.random() * 0.6,
@@ -174,6 +256,21 @@ export function WashEffects() {
             0.14 + Math.random() * 0.08
           );
         }
+      }
+    }
+
+    // Hide unused spray beams
+    if (beamMeshRef.current) {
+      for (let i = beamIdx; i < BEAM_COUNT; i++) {
+        dummy.position.set(0, -30, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        beamMeshRef.current.setMatrixAt(i, dummy.matrix);
+      }
+      beamMeshRef.current.instanceMatrix.needsUpdate = true;
+      if (beamMeshRef.current.instanceColor) {
+        beamMeshRef.current.instanceColor.needsUpdate = true;
       }
     }
 
@@ -191,9 +288,9 @@ export function WashEffects() {
             p.x += p.vx * dt;
             p.y += p.vy * dt;
             p.z += p.vz * dt;
-            const s = p.size * (1 - p.age / p.life * 0.45);
+            const s = p.size * (1 - (p.age / p.life) * 0.45);
             dummy.position.set(p.x, p.y, p.z);
-            dummy.scale.set(s, s * 1.3, s);
+            dummy.scale.set(s, s * 1.35, s);
             dummy.rotation.set(p.age * 4, p.age * 3, 0);
           }
         } else {
@@ -271,16 +368,28 @@ export function WashEffects() {
 
   return (
     <group>
+      {/* Pressurized Water & Foam Jet Cones */}
+      <instancedMesh ref={beamMeshRef} args={[undefined, undefined, BEAM_COUNT]} frustumCulled={false}>
+        <cylinderGeometry args={[0.25, 1.0, 1.0, 7, 1, true]} />
+        <meshBasicMaterial
+          color="#FFFFFF"
+          transparent
+          opacity={0.42}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </instancedMesh>
+
       {/* Pressurized Water Droplets & Splash Mist */}
       <instancedMesh ref={waterMeshRef} args={[undefined, undefined, WATER_COUNT]} frustumCulled={false}>
         <icosahedronGeometry args={[1, 0]} />
         <meshStandardMaterial
           color="#7DD3FC"
           emissive="#38BDF8"
-          emissiveIntensity={0.65}
+          emissiveIntensity={0.75}
           transparent
-          opacity={0.82}
-          roughness={0.15}
+          opacity={0.85}
+          roughness={0.12}
         />
       </instancedMesh>
 
@@ -290,21 +399,21 @@ export function WashEffects() {
         <meshStandardMaterial
           color="#F8FDFF"
           emissive="#E0F2FE"
-          emissiveIntensity={0.28}
+          emissiveIntensity={0.32}
           transparent
-          opacity={0.9}
-          roughness={0.55}
+          opacity={0.92}
+          roughness={0.5}
         />
       </instancedMesh>
 
-      {/* Clean Gloss Sparkles */}
+      {/* Clean Gloss & VIP Sparkles */}
       <instancedMesh ref={sparkleMeshRef} args={[undefined, undefined, SPARKLE_COUNT]} frustumCulled={false}>
         <octahedronGeometry args={[1, 0]} />
         <meshStandardMaterial
           color="#FFF7B2"
           emissive="#FFD700"
-          emissiveIntensity={1.9}
-          roughness={0.1}
+          emissiveIntensity={2.1}
+          roughness={0.08}
         />
       </instancedMesh>
     </group>

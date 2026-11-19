@@ -1,7 +1,8 @@
-import { AlertTriangle, Eye, Swords, X } from 'lucide-react';
+import { AlertTriangle, Eye, Swords, X, Zap } from 'lucide-react';
 import { getPlayerQualityScore } from '../../config/upgrades';
 import { gameSimulation } from '../../engine/simulation';
 import { useGameStore } from '../../store/useGameStore';
+import { formatRub } from '../../utils/currency';
 
 export function CompetitorPanel() {
   const economy = useGameStore((s) => s.economy);
@@ -9,6 +10,7 @@ export function CompetitorPanel() {
   const competitor = useGameStore((s) => s.competitor);
   const setCameraPreset = useGameStore((s) => s.setCameraPreset);
   const setActivePanel = useGameStore((s) => s.setActivePanel);
+  const activateHappyHour = useGameStore((s) => s.activateHappyHour);
 
   const playerQuality = getPlayerQualityScore(upgrades);
   const playerShare = Math.round(gameSimulation.getPlayerAttractionShare() * 100);
@@ -18,6 +20,14 @@ export function CompetitorPanel() {
     ? Math.round(competitor.price * 0.82)
     : competitor.price;
 
+  const playerEffectivePrice =
+    economy.happyHourRemaining > 0
+      ? Math.round(economy.washPrice * 0.85)
+      : economy.washPrice;
+
+  const happyReady =
+    economy.happyHourRemaining <= 0 && economy.happyHourCooldown <= 0;
+
   const rows: Array<{
     label: string;
     playerVal: string;
@@ -26,8 +36,8 @@ export function CompetitorPanel() {
   }> = [
     {
       label: 'Выручка / мин',
-      playerVal: `$${economy.incomePerMin}`,
-      compVal: `$${competitor.revenuePerMin}`,
+      playerVal: formatRub(economy.incomePerMin),
+      compVal: formatRub(competitor.revenuePerMin),
       playerWins: economy.incomePerMin >= competitor.revenuePerMin,
     },
     {
@@ -37,10 +47,10 @@ export function CompetitorPanel() {
       playerWins: economy.carsWashed >= competitor.carsWashed,
     },
     {
-      label: 'Средняя цена',
-      playerVal: `$${economy.washPrice}`,
-      compVal: `$${compEffectivePrice}`,
-      playerWins: economy.washPrice <= compEffectivePrice,
+      label: 'Текущая цена',
+      playerVal: formatRub(playerEffectivePrice),
+      compVal: formatRub(compEffectivePrice),
+      playerWins: playerEffectivePrice <= compEffectivePrice,
     },
     {
       label: 'Качество мойки',
@@ -70,11 +80,17 @@ export function CompetitorPanel() {
   ];
 
   // Dynamic strategic insight
-  let tip = 'Отличный баланс! Расширяйте боксы и нанимайте персонал, чтобы перехватить весь поток.';
+  let tip =
+    'Отличный баланс! Расширяйте боксы и нанимайте мастеров, чтобы перехватить основной поток проспекта.';
   if (competitor.promoActive) {
-    tip = 'TURBO SHINE запустил скидку -18%! Включите рекламу или временно снизьте цену, чтобы удержать клиентов.';
-  } else if (economy.washPrice > compEffectivePrice + 8 && playerQuality < competitor.quality + 0.6) {
-    tip = 'Ваша цена заметно выше конкурента при схожем качестве. Улучшите пену и воск или скорректируйте цену.';
+    tip =
+      'TURBO SHINE запустил скидку -18%! Запустите «Счастливый час» или рекламу, чтобы перехватить клиентов.';
+  } else if (
+    playerEffectivePrice > compEffectivePrice + 250 &&
+    playerQuality < competitor.quality + 0.6
+  ) {
+    tip =
+      'Ваша цена ощутимо выше конкурента при схожем качестве. Улучшите пену и воск или слегка снизьте цену.';
   } else if (upgrades.bays < competitor.bays) {
     tip = `У конкурента ${competitor.bays} бокса, а у вас ${upgrades.bays}. Откройте новый бокс во вкладке «Улучшения»!`;
   }
@@ -143,8 +159,8 @@ export function CompetitorPanel() {
             />
           </div>
           <div className="ui-card-row" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-            <span>Всего заработано: ${economy.totalRevenue.toLocaleString('ru-RU')}</span>
-            <span>Соперник: ${competitor.totalRevenue.toLocaleString('ru-RU')}</span>
+            <span>Всего заработано: {formatRub(economy.totalRevenue, { compact: economy.totalRevenue >= 1_000_000 })}</span>
+            <span>Соперник: {formatRub(competitor.totalRevenue, { compact: competitor.totalRevenue >= 1_000_000 })}</span>
           </div>
         </div>
 
@@ -162,8 +178,8 @@ export function CompetitorPanel() {
             }}
           >
             <span style={{ flex: 1 }}>Показатель</span>
-            <span style={{ width: 80, textAlign: 'right', color: '#00d4ff' }}>Вы</span>
-            <span style={{ width: 80, textAlign: 'right', color: '#ff6b84' }}>Соперник</span>
+            <span style={{ width: 92, textAlign: 'right', color: '#00d4ff' }}>Вы</span>
+            <span style={{ width: 92, textAlign: 'right', color: '#ff6b84' }}>Соперник</span>
           </div>
 
           {rows.map((r) => (
@@ -173,28 +189,30 @@ export function CompetitorPanel() {
               style={{
                 padding: '4px 0',
                 borderBottom: '1px solid rgba(148,163,184,0.08)',
-                fontSize: 13,
+                fontSize: 12.5,
               }}
             >
               <span style={{ flex: 1, color: 'var(--text-secondary)' }}>{r.label}</span>
               <span
                 style={{
-                  width: 80,
+                  width: 92,
                   textAlign: 'right',
                   fontFamily: 'var(--font-mono)',
                   fontWeight: 700,
                   color: r.playerWins ? '#22c55e' : '#f8fafc',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {r.playerVal}
               </span>
               <span
                 style={{
-                  width: 80,
+                  width: 92,
                   textAlign: 'right',
                   fontFamily: 'var(--font-mono)',
                   fontWeight: 600,
                   color: !r.playerWins ? '#ff6b84' : '#94a3b8',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {r.compVal}
@@ -203,22 +221,35 @@ export function CompetitorPanel() {
           ))}
         </div>
 
-        {/* Strategic Tip & Quick Camera Focus */}
+        {/* Strategic Tip & Quick Actions */}
         <div className="ui-card">
           <span className="section-label">Совет аналитика</span>
           <p className="card-sub" style={{ color: '#e2e8f0' }}>
             {tip}
           </p>
-          <button
-            className="btn-secondary"
-            onClick={() => {
-              setCameraPreset('competitor');
-              setActivePanel(null);
-            }}
-          >
-            <Eye size={14} />
-            Осмотреть автомойку конкурента
-          </button>
+          <div className="ui-card-row" style={{ gap: 8 }}>
+            {happyReady && (
+              <button
+                className="btn-primary btn-amber"
+                style={{ flex: 1 }}
+                onClick={activateHappyHour}
+              >
+                <Zap size={14} fill="currentColor" />
+                Счастливый час
+              </button>
+            )}
+            <button
+              className="btn-secondary"
+              style={{ flex: 1 }}
+              onClick={() => {
+                setCameraPreset('competitor');
+                setActivePanel(null);
+              }}
+            >
+              <Eye size={14} />
+              К сопернику
+            </button>
+          </div>
         </div>
       </div>
     </div>

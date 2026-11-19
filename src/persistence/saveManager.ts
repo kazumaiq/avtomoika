@@ -1,9 +1,9 @@
 import type { SavePayload } from '../types/game';
 
-const STORAGE_KEY = 'automoika_save_v2';
+const STORAGE_KEY = 'automoika_save_v3_rub';
 const IDB_NAME = 'automoika_db';
 const IDB_STORE = 'saves';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 export function saveGameSync(payload: Omit<SavePayload, 'version' | 'savedAt'>): SavePayload {
   const full: SavePayload = {

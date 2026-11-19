@@ -315,6 +315,60 @@ class SoundEngine {
     g.connect(this.ctx.destination);
     src.start(now, Math.random() * 0.8, 0.5);
   }
+
+  public playFanfare(): void {
+    const v = this.getEffectiveSfx(0.32);
+    if (!this.ctx || v <= 0) return;
+    const now = this.ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    notes.forEach((freq, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = idx === notes.length - 1 ? 'sine' : 'triangle';
+      const t = now + idx * 0.06;
+      osc.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(v * 0.85, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+      osc.connect(g);
+      g.connect(this.ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.4);
+    });
+  }
+
+  public playTurboSplash(): void {
+    const v = this.getEffectiveSfx(0.28);
+    if (!this.ctx || v <= 0) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(420, now);
+    osc.frequency.exponentialRampToValueAtTime(1240, now + 0.14);
+    g.gain.setValueAtTime(v * 0.7, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+    osc.connect(g);
+    g.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.17);
+
+    if (this.noiseBuffer) {
+      const n = this.ctx.createBufferSource();
+      n.buffer = this.noiseBuffer;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(2800, now);
+      bp.Q.value = 1.0;
+      const ng = this.ctx.createGain();
+      ng.gain.setValueAtTime(v * 0.6, now);
+      ng.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      n.connect(bp);
+      bp.connect(ng);
+      ng.connect(this.ctx.destination);
+      n.start(now, Math.random() * 0.4, 0.24);
+    }
+  }
 }
 
 export const soundEngine = new SoundEngine();

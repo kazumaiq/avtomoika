@@ -6,6 +6,7 @@ import { gameSimulation } from '../../engine/simulation';
 import {
   getBayFloorTexture,
   getLotConcreteTexture,
+  getPriceTotemTexture,
   getSignTexture,
 } from '../../graphics/proceduralTextures';
 import { useGameStore } from '../../store/useGameStore';
@@ -13,8 +14,10 @@ import { useGameStore } from '../../store/useGameStore';
 export function PlayerCarWash() {
   const upgrades = useGameStore((s) => s.upgrades);
   const adCampaign = useGameStore((s) => s.economy.adCampaign);
+  const washPrice = useGameStore((s) => s.economy.washPrice);
+  const happyHourActive = useGameStore((s) => s.economy.happyHourRemaining > 0);
 
-  const lotTex = useMemo(() => getLotConcreteTexture('#353F52'), []);
+  const lotTex = useMemo(() => getLotConcreteTexture('#3B475C'), []);
   const bayFloorTex = useMemo(() => getBayFloorTexture('#00D4FF'), []);
   const mainSignTex = useMemo(
     () => getSignTexture('AUTOMOIKA', 'ПРЕМИУМ ДЕТЕЙЛИНГ • 24/7', '#0E1526', '#00D4FF', '#FFFFFF'),
@@ -24,31 +27,55 @@ export function PlayerCarWash() {
     () => getSignTexture('SUPER WASH!', 'АКТИВНАЯ ПЕНА + ВОСК', '#181024', '#FF3B5C', '#FFF5E1'),
     []
   );
+  const effPrice = happyHourActive ? Math.round((washPrice * 0.85) / 10) * 10 : washPrice;
+  const priceTotemTex = useMemo(
+    () =>
+      getPriceTotemTexture(
+        'AUTOMOIKA',
+        effPrice,
+        happyHourActive ? '#FFB800' : '#00D4FF',
+        happyHourActive ? 'ЧАС -15%!' : undefined
+      ),
+    [effPrice, happyHourActive]
+  );
 
   const ledRefs = useRef<Array<THREE.MeshStandardMaterial | null>>([null, null, null, null]);
+  const gantryRefs = useRef<Array<THREE.Group | null>>([null, null, null, null]);
 
-  // Update each bay's overhead LED status strip in real time without re-rendering React
-  useFrame(() => {
+  // Update bay LED strips & animated sliding wash gantry arches smoothly in real time
+  useFrame((clockState) => {
+    const t = clockState.clock.elapsedTime;
     for (let i = 0; i < 4; i++) {
       const mat = ledRefs.current[i];
-      if (!mat) continue;
       const status = gameSimulation.getBayStatus('player', i);
-      if (status === 'free') {
-        mat.color.set('#22C55E');
-        mat.emissive.set('#22C55E');
-        mat.emissiveIntensity = 1.3;
-      } else if (status === 'incoming') {
-        mat.color.set('#FFB800');
-        mat.emissive.set('#FFB800');
-        mat.emissiveIntensity = 1.8;
-      } else if (status === 'washing') {
-        mat.color.set('#00D4FF');
-        mat.emissive.set('#00D4FF');
-        mat.emissiveIntensity = 2.2;
-      } else {
-        mat.color.set('#A3E635');
-        mat.emissive.set('#A3E635');
-        mat.emissiveIntensity = 2.4;
+      if (mat) {
+        if (status === 'free') {
+          mat.color.set('#22C55E');
+          mat.emissive.set('#22C55E');
+          mat.emissiveIntensity = 1.4;
+        } else if (status === 'incoming') {
+          mat.color.set('#FFB800');
+          mat.emissive.set('#FFB800');
+          mat.emissiveIntensity = 1.9;
+        } else if (status === 'washing') {
+          mat.color.set('#00D4FF');
+          mat.emissive.set('#00D4FF');
+          mat.emissiveIntensity = 2.4;
+        } else {
+          mat.color.set('#A3E635');
+          mat.emissive.set('#A3E635');
+          mat.emissiveIntensity = 2.6;
+        }
+      }
+
+      const gantry = gantryRefs.current[i];
+      if (gantry) {
+        const car = gameSimulation.getBayVehicle('player', i);
+        const desiredZ =
+          car && (car.washStage === 'rinse' || car.washStage === 'foam' || car.washStage === 'dry')
+            ? Math.sin(t * 1.4 + i) * 1.85
+            : -0.35;
+        gantry.position.z = THREE.MathUtils.lerp(gantry.position.z, desiredZ, 0.08);
       }
     }
   });
@@ -104,6 +131,32 @@ export function PlayerCarWash() {
           </mesh>
         </group>
       ))}
+
+      {/* Live Glowing Ruble Price Totem Pylon at Entrance */}
+      <group position={[15.0, 0.08, 7.9]} rotation={[0, -0.32, 0]}>
+        <mesh position={[0, 2.35, 0]} castShadow>
+          <boxGeometry args={[1.65, 4.7, 0.36]} />
+          <meshStandardMaterial color="#0F172A" roughness={0.35} metalness={0.5} />
+        </mesh>
+        <mesh position={[0, 2.35, -0.2]} rotation={[0, Math.PI, 0]}>
+          <planeGeometry args={[1.5, 4.4]} />
+          <meshStandardMaterial
+            map={priceTotemTex}
+            emissive="#FFFFFF"
+            emissiveMap={priceTotemTex}
+            emissiveIntensity={0.85}
+          />
+        </mesh>
+        <mesh position={[0, 2.35, 0.2]}>
+          <planeGeometry args={[1.5, 4.4]} />
+          <meshStandardMaterial
+            map={priceTotemTex}
+            emissive="#FFFFFF"
+            emissiveMap={priceTotemTex}
+            emissiveIntensity={0.85}
+          />
+        </mesh>
+      </group>
 
       {/* Entry & Exit Driveway Signs */}
       <group position={[21.2, 0.08, 8.4]}>
@@ -226,8 +279,9 @@ export function PlayerCarWash() {
             depthWrite={false}
           />
         </mesh>
-        {/* Interior Wash Bay Warm-Cyan Floodlight */}
-        <pointLight position={[-3.0, 4.1, 0]} color="#E0F7FF" intensity={18} distance={24} decay={1.6} />
+        {/* Interior Wash Bay Studio Floodlights (keeps all 4 bays luminous day and night!) */}
+        <pointLight position={[-6.0, 4.3, 0]} color="#E6F9FF" intensity={26} distance={28} decay={1.5} />
+        <pointLight position={[5.5, 4.3, 0]} color="#E6F9FF" intensity={24} distance={28} decay={1.5} />
         {/* Front Bold Cyan Graphic Edge */}
         <mesh position={[0, 4.78, -4.2]}>
           <boxGeometry args={[24.8, 0.22, 0.14]} />
@@ -371,8 +425,21 @@ export function PlayerCarWash() {
                   />
                 </mesh>
 
-                {/* Overhead Wash Gantry Arch (visually upgrades with Pressure Washer / Foam / Dryer!) */}
-                <group position={[0, 0, -0.3]}>
+                {/* Overhead Studio LED Ceiling Light Tubes */}
+                {[-1.55, 1.55].map((lx) => (
+                  <mesh key={lx} position={[lx, 4.55, 0]}>
+                    <boxGeometry args={[0.14, 0.08, 6.2]} />
+                    <meshStandardMaterial color="#FFFFFF" emissive="#E0F7FF" emissiveIntensity={2.2} />
+                  </mesh>
+                ))}
+
+                {/* Overhead Animated Sliding Wash Gantry Arch */}
+                <group
+                  ref={(el) => {
+                    gantryRefs.current[idx] = el;
+                  }}
+                  position={[0, 0, -0.35]}
+                >
                   <mesh position={[-2.35, 1.8, 0]} castShadow>
                     <boxGeometry args={[0.26, 3.6, 0.42]} />
                     <meshStandardMaterial

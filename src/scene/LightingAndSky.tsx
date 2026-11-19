@@ -1,20 +1,21 @@
 import { useFrame, useThree } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useGameStore } from '../store/useGameStore';
 
 export function resolveEffectiveTime(timeOfDay: number, mode: string): number {
-  if (mode === 'morning') return 0.27;
-  if (mode === 'day') return 0.48;
+  if (mode === 'morning') return 0.28;
+  if (mode === 'day') return 0.46;
   if (mode === 'sunset') return 0.71;
-  if (mode === 'night') return 0.93;
+  if (mode === 'night') return 0.92;
   return timeOfDay;
 }
 
 export function getNightFactor(t: number): number {
   // Returns 0 in bright day, 1 at deep night
   const sunWave = Math.sin((t - 0.22) * Math.PI * 2);
-  return THREE.MathUtils.clamp((-sunWave + 0.15) * 1.15, 0, 1);
+  return THREE.MathUtils.clamp((-sunWave + 0.12) * 1.15, 0, 1);
 }
 
 const SKY_VERTEX = /* glsl */ `
@@ -33,32 +34,58 @@ const SKY_FRAGMENT = /* glsl */ `
   uniform vec3 uSunDir;
   uniform vec3 uSunColor;
   uniform float uNight;
+  uniform float uTime;
   varying vec3 vWorldPos;
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  }
 
   void main() {
     vec3 dir = normalize(vWorldPos);
     float h = clamp(dir.y, 0.0, 1.0);
 
-    // Rich 3-stop Spider-Verse graphic novel sky gradient
-    vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.26, h));
-    col = mix(col, uTopColor, smoothstep(0.24, 0.85, h));
+    // Rich 3-stop vibrant graphic sky gradient
+    vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.28, h));
+    col = mix(col, uTopColor, smoothstep(0.24, 0.86, h));
 
-    // Stylized stepped halftone band near horizon
-    float band = floor(h * 14.0) / 14.0;
-    col = mix(col, mix(uHorizonColor, uMidColor, band), 0.14);
+    // Stylized soft drifting clouds during day & sunset
+    if (h > 0.06) {
+      vec2 cloudUv = dir.xz / (h + 0.24) * 1.85 + vec2(uTime * 0.015, uTime * 0.005);
+      float n1 = noise(cloudUv);
+      float n2 = noise(cloudUv * 2.1 + vec2(4.2, 1.7));
+      float cloud = smoothstep(0.56, 0.82, n1 * 0.65 + n2 * 0.35);
+      vec3 cloudCol = mix(vec3(1.0, 0.98, 0.95), uHorizonColor * 1.15, 0.35);
+      float cloudAlpha = cloud * smoothstep(0.06, 0.24, h) * (1.0 - smoothstep(0.7, 0.95, h)) * (1.0 - uNight * 0.72);
+      col = mix(col, cloudCol, cloudAlpha * 0.55);
+    }
 
     // Crisp sun / moon disc + vibrant halo
     float sunDot = max(dot(dir, normalize(uSunDir)), 0.0);
-    float halo = pow(sunDot, 10.0) * 0.45;
-    float disc = smoothstep(0.9965, 0.9985, sunDot);
-    col += uSunColor * (halo + disc * 1.4);
+    float halo = pow(sunDot, 8.0) * 0.42;
+    float disc = smoothstep(0.996, 0.9985, sunDot);
+    col += uSunColor * (halo + disc * 1.45);
 
-    // Crisp stars at twilight/night
-    if (uNight > 0.25 && h > 0.12) {
-      vec2 grid = floor(dir.xz / max(0.18, dir.y) * 28.0);
-      float hash = fract(sin(dot(grid, vec2(127.1, 311.7))) * 43758.5453);
-      if (hash > 0.992) {
-        col += vec3(0.9, 0.96, 1.0) * uNight * smoothstep(0.12, 0.45, h) * 0.85;
+    // Twinkling stars at twilight/night
+    if (uNight > 0.22 && h > 0.1) {
+      vec2 grid = floor(dir.xz / max(0.18, dir.y) * 30.0);
+      float hash = hash21(grid);
+      if (hash > 0.988) {
+        float twinkle = 0.65 + 0.35 * sin(uTime * 3.0 + hash * 60.0);
+        col += vec3(0.88, 0.95, 1.0) * uNight * twinkle * smoothstep(0.1, 0.42, h) * 0.95;
       }
     }
 
@@ -68,66 +95,88 @@ const SKY_FRAGMENT = /* glsl */ `
 
 export function LightingAndSky() {
   const quality = useGameStore((s) => s.settings.quality);
-  const { scene } = useThree();
+  const { scene, gl } = useThree();
 
   const dirLightRef = useRef<THREE.DirectionalLight>(null);
   const hemiLightRef = useRef<THREE.HemisphereLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
+
+  // Build crisp procedural PMREM Environment map (offline, zero network!) for glossy car clearcoat & wet reflections!
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmrem.fromScene(roomEnv, 0.04);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = 0.72;
+    roomEnv.dispose();
+    return () => {
+      scene.environment = null;
+      envRT.dispose();
+      pmrem.dispose();
+    };
+  }, [gl, scene]);
 
   const skyMaterial = useMemo(() => {
     return new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        uTopColor: { value: new THREE.Color('#193366') },
-        uMidColor: { value: new THREE.Color('#FF6F59') },
-        uHorizonColor: { value: new THREE.Color('#FFC875') },
-        uSunDir: { value: new THREE.Vector3(0.6, 0.45, -0.4) },
-        uSunColor: { value: new THREE.Color('#FFE09E') },
+        uTopColor: { value: new THREE.Color('#1A5BB8') },
+        uMidColor: { value: new THREE.Color('#53B3F2') },
+        uHorizonColor: { value: new THREE.Color('#D4F0FF') },
+        uSunDir: { value: new THREE.Vector3(0.55, 0.72, -0.35) },
+        uSunColor: { value: new THREE.Color('#FFF7E0') },
         uNight: { value: 0 },
+        uTime: { value: 0 },
       },
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,
     });
   }, []);
 
+  useEffect(() => {
+    return () => {
+      skyMaterial.dispose();
+    };
+  }, [skyMaterial]);
+
   const palette = useMemo(
     () => ({
       morning: {
-        top: new THREE.Color('#235596'),
-        mid: new THREE.Color('#6FA8DC'),
-        horizon: new THREE.Color('#FFD29D'),
-        sun: new THREE.Color('#FFE5B4'),
-        hemiSky: new THREE.Color('#8ED6FF'),
-        hemiGround: new THREE.Color('#47333A'),
-        fog: new THREE.Color('#D5C4C0'),
+        top: new THREE.Color('#1E62B0'),
+        mid: new THREE.Color('#6BB7EB'),
+        horizon: new THREE.Color('#FFE0B2'),
+        sun: new THREE.Color('#FFF0CC'),
+        hemiSky: new THREE.Color('#A8E0FF'),
+        hemiGround: new THREE.Color('#4B4558'),
+        fog: new THREE.Color('#DCE7F0'),
       },
       day: {
-        top: new THREE.Color('#1B56A8'),
-        mid: new THREE.Color('#4DA8E8'),
-        horizon: new THREE.Color('#C4E8FF'),
-        sun: new THREE.Color('#FFF6E3'),
-        hemiSky: new THREE.Color('#A8E2FF'),
-        hemiGround: new THREE.Color('#3A3F54'),
-        fog: new THREE.Color('#BBDDF2'),
+        top: new THREE.Color('#155BC0'),
+        mid: new THREE.Color('#48B2F5'),
+        horizon: new THREE.Color('#D4F0FF'),
+        sun: new THREE.Color('#FFF9EB'),
+        hemiSky: new THREE.Color('#BCE8FF'),
+        hemiGround: new THREE.Color('#46506B'),
+        fog: new THREE.Color('#C8E6FA'),
       },
       sunset: {
-        top: new THREE.Color('#1D1B4B'),
-        mid: new THREE.Color('#D93B6A'),
-        horizon: new THREE.Color('#FF9F5A'),
-        sun: new THREE.Color('#FFD07A'),
-        hemiSky: new THREE.Color('#FF8A65'),
-        hemiGround: new THREE.Color('#1E2F4D'),
-        fog: new THREE.Color('#C46374'),
+        top: new THREE.Color('#22245E'),
+        mid: new THREE.Color('#E84B78'),
+        horizon: new THREE.Color('#FFB067'),
+        sun: new THREE.Color('#FFD98A'),
+        hemiSky: new THREE.Color('#FFA27B'),
+        hemiGround: new THREE.Color('#2C3B5E'),
+        fog: new THREE.Color('#D47A88'),
       },
       night: {
-        top: new THREE.Color('#070B1A'),
-        mid: new THREE.Color('#111B3A'),
-        horizon: new THREE.Color('#1F2D54'),
-        sun: new THREE.Color('#80D8FF'),
-        hemiSky: new THREE.Color('#30508C'),
-        hemiGround: new THREE.Color('#121524'),
-        fog: new THREE.Color('#121C36'),
+        top: new THREE.Color('#0B142E'),
+        mid: new THREE.Color('#182B5C'),
+        horizon: new THREE.Color('#2A4175'),
+        sun: new THREE.Color('#99E2FF'),
+        hemiSky: new THREE.Color('#4B77C2'),
+        hemiGround: new THREE.Color('#1D263E'),
+        fog: new THREE.Color('#1C2B4D'),
       },
     }),
     []
@@ -141,12 +190,11 @@ export function LightingAndSky() {
   const tmpHemiGnd = useMemo(() => new THREE.Color(), []);
   const tmpFog = useMemo(() => new THREE.Color(), []);
 
-  useFrame(() => {
+  useFrame((clockState) => {
     const state = useGameStore.getState();
     const t = resolveEffectiveTime(state.timeOfDay, state.settings.timeMode);
     const night = getNightFactor(t);
 
-    // Blend smoothly across 4 stylized Spider-Verse keyframe color scripts
     let from = palette.night;
     let to = palette.morning;
     let alpha = 0;
@@ -177,11 +225,11 @@ export function LightingAndSky() {
     tmpHemiGnd.copy(from.hemiGround).lerp(to.hemiGround, alpha);
     tmpFog.copy(from.fog).lerp(to.fog, alpha);
 
-    // Sun orbit arc
+    // Keep sun well elevated so shadows stay soft and never slice darkly across the road!
     const sunAngle = (t - 0.22) * Math.PI * 2;
-    const sunY = Math.max(0.18, Math.sin(sunAngle) * 0.85 + 0.12);
-    const sunX = Math.cos(sunAngle) * 0.9;
-    const sunZ = -0.42;
+    const sunY = Math.max(0.42, Math.sin(sunAngle) * 0.78 + 0.25);
+    const sunX = Math.cos(sunAngle) * 0.72;
+    const sunZ = -0.38;
 
     skyMaterial.uniforms.uTopColor.value.copy(tmpTop);
     skyMaterial.uniforms.uMidColor.value.copy(tmpMid);
@@ -189,27 +237,28 @@ export function LightingAndSky() {
     skyMaterial.uniforms.uSunColor.value.copy(tmpSun);
     skyMaterial.uniforms.uSunDir.value.set(sunX, sunY, sunZ).normalize();
     skyMaterial.uniforms.uNight.value = night;
+    skyMaterial.uniforms.uTime.value = clockState.clock.elapsedTime;
 
     if (scene.fog instanceof THREE.Fog) {
       scene.fog.color.copy(tmpFog);
     }
     scene.background = tmpFog;
+    scene.environmentIntensity = THREE.MathUtils.lerp(0.82, 0.42, night);
 
     if (dirLightRef.current) {
-      dirLightRef.current.position.set(sunX * 48, Math.max(22, sunY * 54), sunZ * 42);
+      dirLightRef.current.position.set(sunX * 42, Math.max(30, sunY * 56), sunZ * 36);
       dirLightRef.current.color.copy(tmpSun);
-      dirLightRef.current.intensity = THREE.MathUtils.lerp(2.75, 0.95, night);
+      dirLightRef.current.intensity = THREE.MathUtils.lerp(2.65, 1.25, night);
     }
 
     if (hemiLightRef.current) {
       hemiLightRef.current.color.copy(tmpHemiSky);
       hemiLightRef.current.groundColor.copy(tmpHemiGnd);
-      hemiLightRef.current.intensity = THREE.MathUtils.lerp(1.65, 0.88, night);
+      hemiLightRef.current.intensity = THREE.MathUtils.lerp(1.55, 1.05, night);
     }
 
     if (rimLightRef.current) {
-      // Vibrant Spider-Verse cyan/magenta rim accent
-      rimLightRef.current.intensity = THREE.MathUtils.lerp(1.05, 1.25, night);
+      rimLightRef.current.intensity = THREE.MathUtils.lerp(0.85, 1.35, night);
     }
   });
 
@@ -217,39 +266,41 @@ export function LightingAndSky() {
 
   return (
     <>
-      <fog attach="fog" args={['#C46374', 65, 165]} />
+      <fog attach="fog" args={['#C8E6FA', 75, 185]} />
 
-      {/* Stylized Shader Sky Dome */}
-      <mesh material={skyMaterial} scale={[160, 160, 160]}>
-        <sphereGeometry args={[1, 24, 16]} />
+      {/* Stylized Shader Sky Dome with Drifting Clouds */}
+      <mesh material={skyMaterial} scale={[165, 165, 165]}>
+        <sphereGeometry args={[1, 28, 20]} />
       </mesh>
 
-      {/* Main Key Sunlight with Crisp Volumetric-Feel Shadow Map */}
+      {/* Main Key Sunlight with Expanded Shadow Frustum (no hard shadow edge on the street!) */}
       <directionalLight
         ref={dirLightRef}
-        position={[32, 36, -20]}
-        intensity={2.1}
+        position={[26, 44, -18]}
+        intensity={2.4}
         castShadow={quality !== 'low'}
         shadow-mapSize-width={shadowMapSize}
         shadow-mapSize-height={shadowMapSize}
         shadow-camera-near={5}
-        shadow-camera-far={125}
-        shadow-camera-left={-38}
-        shadow-camera-right={38}
-        shadow-camera-top={38}
-        shadow-camera-bottom={-38}
-        shadow-bias={-0.0005}
+        shadow-camera-far={145}
+        shadow-camera-left={-56}
+        shadow-camera-right={56}
+        shadow-camera-top={56}
+        shadow-camera-bottom={-56}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.05}
+        shadow-radius={3}
       />
 
-      {/* Spider-Verse Teal-vs-Coral Bounce Hemisphere */}
-      <hemisphereLight ref={hemiLightRef} args={['#FF8A65', '#1E2F4D', 1.05]} />
+      {/* Rich Atmospheric Bounce Hemisphere */}
+      <hemisphereLight ref={hemiLightRef} args={['#BCE8FF', '#46506B', 1.4]} />
 
       {/* Cool Cyan Graphic Rim Light */}
       <directionalLight
         ref={rimLightRef}
-        position={[-28, 18, 34]}
+        position={[-28, 22, 34]}
         color="#38BDF8"
-        intensity={0.7}
+        intensity={0.9}
       />
     </>
   );

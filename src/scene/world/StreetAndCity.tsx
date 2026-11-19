@@ -77,6 +77,14 @@ const TREE_POSITIONS: Array<[number, number, number]> = [
   [36, -7.2, 1.0],
 ];
 
+const PEDESTRIANS = [
+  { startX: -32, z: 6.3, dir: 1, speed: 1.55, shirt: '#38BDF8', pants: '#1E293B', skin: '#F2C9A8' },
+  { startX: 28, z: 6.1, dir: -1, speed: 1.35, shirt: '#F43F5E', pants: '#1F2937', skin: '#E0AC82' },
+  { startX: -12, z: -6.2, dir: 1, speed: 1.45, shirt: '#FACC15', pants: '#1E293B', skin: '#F5D5BC' },
+  { startX: 16, z: -6.4, dir: -1, speed: 1.6, shirt: '#22C55E', pants: '#0F172A', skin: '#C6865B' },
+  { startX: 4, z: 6.4, dir: 1, speed: 1.25, shirt: '#A855F7', pants: '#1E293B', skin: '#F2C9A8' },
+];
+
 export function StreetAndCity() {
   const roadTexture = useMemo(() => getRoadTexture(), []);
 
@@ -85,13 +93,31 @@ export function StreetAndCity() {
   const lampPoleInstRef = useRef<THREE.InstancedMesh>(null);
   const lampBulbInstRef = useRef<THREE.InstancedMesh>(null);
   const lampBulbMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const lampPoolMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: '#FFE29A',
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }),
+    []
+  );
+  const pedRefs = useRef<Array<THREE.Group | null>>([]);
+  const pedPosRef = useRef<number[]>(PEDESTRIANS.map((p) => p.startX));
+
+  useEffect(() => {
+    return () => {
+      lampPoolMat.dispose();
+    };
+  }, [lampPoolMat]);
 
   // Populate instanced meshes once for optimal draw-call count
   useEffect(() => {
     const dummy = new THREE.Object3D();
 
     if (trunkInstRef.current && foliageInstRef.current) {
-      const foliageColors = ['#2E7D5B', '#388E68', '#D97736', '#2B6E5C', '#C85A32'];
+      const foliageColors = ['#2E8B57', '#3FA66C', '#E07A38', '#2B7A63', '#D45E34'];
       const c = new THREE.Color();
 
       TREE_POSITIONS.forEach(([x, z, s], i) => {
@@ -137,14 +163,31 @@ export function StreetAndCity() {
     }
   }, []);
 
-  // Dynamically boost streetlamp glow at dusk & night
-  useFrame(() => {
+  // Dynamically boost streetlamp glow & animate strolling pedestrians
+  useFrame((clockState, rawDt) => {
     const state = useGameStore.getState();
     const t = resolveEffectiveTime(state.timeOfDay, state.settings.timeMode);
     const night = getNightFactor(t);
     if (lampBulbMatRef.current) {
-      lampBulbMatRef.current.emissiveIntensity = 0.4 + night * 2.8;
+      lampBulbMatRef.current.emissiveIntensity = 0.5 + night * 3.0;
     }
+    lampPoolMat.opacity = night * 0.24;
+
+    const dt = state.paused ? 0 : Math.min(rawDt, 0.05) * state.simSpeed;
+    const elapsed = clockState.clock.elapsedTime;
+    PEDESTRIANS.forEach((ped, idx) => {
+      if (dt > 0) {
+        let nx = pedPosRef.current[idx] + ped.dir * ped.speed * dt;
+        if (nx > 44) nx = -44;
+        if (nx < -44) nx = 44;
+        pedPosRef.current[idx] = nx;
+      }
+      const grp = pedRefs.current[idx];
+      if (grp) {
+        grp.position.set(pedPosRef.current[idx], 0.14 + Math.abs(Math.sin(elapsed * 6 + idx)) * 0.05, ped.z);
+        grp.rotation.y = ped.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+      }
+    });
   });
 
   return (
@@ -258,6 +301,46 @@ export function StreetAndCity() {
           roughness={0.2}
         />
       </instancedMesh>
+
+      {/* Warm Glowing Streetlamp Ground Light Pools (visible at dusk & night) */}
+      <group>
+        {LAMP_POSITIONS.map(([x, z], idx) => (
+          <mesh
+            key={idx}
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[x, 0.03, z > 0 ? z - 2.2 : z + 2.2]}
+            material={lampPoolMat}
+          >
+            <circleGeometry args={[4.4, 20]} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Strolling Sidewalk Pedestrians */}
+      <group>
+        {PEDESTRIANS.map((ped, idx) => (
+          <group
+            key={idx}
+            ref={(el) => {
+              pedRefs.current[idx] = el;
+            }}
+            position={[ped.startX, 0.14, ped.z]}
+          >
+            <mesh position={[0, 0.42, 0]} castShadow>
+              <boxGeometry args={[0.26, 0.56, 0.18]} />
+              <meshStandardMaterial color={ped.pants} roughness={0.8} />
+            </mesh>
+            <mesh position={[0, 0.92, 0]} castShadow>
+              <boxGeometry args={[0.34, 0.48, 0.22]} />
+              <meshStandardMaterial color={ped.shirt} roughness={0.68} />
+            </mesh>
+            <mesh position={[0, 1.32, 0]} castShadow>
+              <sphereGeometry args={[0.16, 10, 8]} />
+              <meshStandardMaterial color={ped.skin} roughness={0.68} />
+            </mesh>
+          </group>
+        ))}
+      </group>
 
       {/* Surrounding Spider-Verse Stylized City Blocks */}
       {SURROUNDING_BUILDINGS.map((b, idx) => (

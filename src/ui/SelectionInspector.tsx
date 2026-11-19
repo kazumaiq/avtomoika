@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion';
-import { Award, Car, Crosshair, DollarSign, User, X } from 'lucide-react';
+import { Award, Car, Crosshair, Crown, RussianRuble, User, X, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getRaiseAmount, getTrainingCost } from '../config/staff';
 import { VEHICLE_SPECS } from '../config/vehicles';
 import { gameSimulation } from '../engine/simulation';
 import { useGameStore } from '../store/useGameStore';
 import type { VehicleEntity, WashStage, WorkerActionState } from '../types/game';
+import { formatRub } from '../utils/currency';
 
 const STAGE_LABEL: Record<WashStage, string> = {
   none: 'Подъезд / очередь',
@@ -37,6 +38,7 @@ export function SelectionInspector() {
 
   const setSelection = useGameStore((s) => s.setSelection);
   const toggleFollowSelected = useGameStore((s) => s.toggleFollowSelected);
+  const boostVehicleWash = useGameStore((s) => s.boostVehicleWash);
   const trainWorker = useGameStore((s) => s.trainWorker);
   const giveWorkerRaise = useGameStore((s) => s.giveWorkerRaise);
   const assignWorkerBay = useGameStore((s) => s.assignWorkerBay);
@@ -45,7 +47,7 @@ export function SelectionInspector() {
 
   useEffect(() => {
     if (!selection) return;
-    const id = window.setInterval(() => setTick((t) => t + 1), 220);
+    const id = window.setInterval(() => setTick((t) => t + 1), 180);
     return () => window.clearInterval(id);
   }, [selection]);
 
@@ -60,6 +62,10 @@ export function SelectionInspector() {
     const spec = VEHICLE_SPECS[car.category];
     const cleanPct = Math.round((1 - car.dirtLevel) * 100);
     const washPct = Math.round(car.washProgress * 100);
+    const canBoost =
+      car.owner === 'player' &&
+      car.state === 'washing' &&
+      performance.now() - car.lastBoostAt >= 1200;
 
     return (
       <motion.aside
@@ -70,9 +76,16 @@ export function SelectionInspector() {
       >
         <div className="ui-card-row">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Car size={16} color={car.owner === 'player' ? '#00d4ff' : '#ff4d4f'} />
+            {car.isVip ? (
+              <Crown size={16} color="#facc15" fill="#facc15" />
+            ) : (
+              <Car size={16} color={car.owner === 'player' ? '#00d4ff' : '#ff4d4f'} />
+            )}
             <div>
-              <div className="card-title">{car.modelName}</div>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>{car.modelName}</span>
+                {car.isVip && <span className="pill-tag amber">VIP ×2.3</span>}
+              </div>
               <div className="card-sub">
                 {spec.labelRu} • {car.owner === 'player' ? 'AUTOMOIKA' : 'TURBO SHINE'}
               </div>
@@ -85,7 +98,7 @@ export function SelectionInspector() {
 
         <div className="ui-card-row">
           <span className="pill-tag">{STAGE_LABEL[car.washStage]}</span>
-          <span className="hud-metric-sub val-positive">~${car.expectedPrice}</span>
+          <span className="hud-metric-sub val-positive">~{formatRub(car.expectedPrice)}</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -132,6 +145,21 @@ export function SelectionInspector() {
               />
             </div>
           </div>
+        )}
+
+        {car.owner === 'player' && car.state === 'washing' && (
+          <button
+            id="btn-turbo-boost"
+            className="btn-turbo"
+            disabled={!canBoost}
+            onClick={() => {
+              boostVehicleWash(car.id);
+              setTick((t) => t + 1);
+            }}
+          >
+            <Zap size={15} fill="currentColor" />
+            {canBoost ? 'Турбо-помощь (+15% мойки)' : 'Перезарядка струи...'}
+          </button>
         )}
 
         <button
@@ -245,21 +273,21 @@ export function SelectionInspector() {
           <div className="ui-card-row" style={{ gap: 6 }}>
             <button
               className="btn-primary"
-              style={{ flex: 1, height: 32, fontSize: 12 }}
+              style={{ flex: 1, height: 32, fontSize: 11 }}
               disabled={profile.level >= 10 || balance < trainCost}
               onClick={() => trainWorker(profile.id)}
             >
               <Award size={13} />
-              {profile.level >= 10 ? 'Макс' : `Обучить $${trainCost}`}
+              {profile.level >= 10 ? 'Макс' : `Обучить ${formatRub(trainCost)}`}
             </button>
             <button
               className="btn-secondary"
-              style={{ flex: 1, height: 32, fontSize: 12 }}
+              style={{ flex: 1, height: 32, fontSize: 11 }}
               disabled={profile.morale >= 1.35}
               onClick={() => giveWorkerRaise(profile.id)}
             >
-              <DollarSign size={13} />
-              +${raiseAmt}/м
+              <RussianRuble size={12} />
+              +{raiseAmt}/м
             </button>
           </div>
         </>

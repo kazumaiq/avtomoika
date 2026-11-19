@@ -343,3 +343,74 @@ export function getBuildingFacadeTexture(
     return tex;
   }) as THREE.CanvasTexture;
 }
+
+/**
+ * Dynamic glowing entrance price pylon texture showing live Ruble price
+ */
+export function getPriceTotemTexture(
+  brand: string,
+  priceRub: number,
+  accentHex: string,
+  promoText?: string
+): THREE.CanvasTexture {
+  const key = `totem-${brand}-${priceRub}-${accentHex}-${promoText ?? ''}`;
+  return getOrCreate(key, () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    ctx.fillStyle = '#0D1322';
+    ctx.fillRect(0, 0, 256, 512);
+
+    ctx.strokeStyle = accentHex;
+    ctx.lineWidth = 10;
+    ctx.strokeRect(8, 8, 240, 496);
+
+    ctx.fillStyle = accentHex;
+    ctx.fillRect(16, 16, 224, 72);
+    ctx.fillStyle = '#09101C';
+    ctx.font = '900 32px "Space Grotesk", "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(brand, 128, 53);
+
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '700 22px "Inter", sans-serif';
+    ctx.fillText('МОЙКА ОТ', 128, 138);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 54px "JetBrains Mono", "Space Grotesk", sans-serif';
+    ctx.fillText(`${priceRub.toLocaleString('ru-RU')}₽`, 128, 212);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(28, 268, 200, 3);
+
+    ctx.fillStyle = '#38BDF8';
+    ctx.font = '700 24px "Inter", sans-serif';
+    ctx.fillText('ПЕНА • ВОСК', 128, 320);
+    ctx.fillStyle = '#E2E8F0';
+    ctx.font = '600 21px "Inter", sans-serif';
+    ctx.fillText('24/7 БЕЗ ВЫХОДНЫХ', 128, 362);
+
+    if (promoText) {
+      ctx.fillStyle = '#FFB800';
+      ctx.fillRect(20, 404, 216, 76);
+      ctx.fillStyle = '#120E04';
+      ctx.font = '900 26px "Space Grotesk", "Inter", sans-serif';
+      ctx.fillText(promoText, 128, 444);
+    } else {
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.22)';
+      ctx.fillRect(28, 412, 200, 60);
+      ctx.fillStyle = '#4ADE80';
+      ctx.font = '800 26px "Space Grotesk", "Inter", sans-serif';
+      ctx.fillText('ОТКРЫТО', 128, 444);
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  }) as THREE.CanvasTexture;
+}
+

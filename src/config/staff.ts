@@ -55,7 +55,7 @@ export function createAppearance(owner: OwnerSide, seed?: number): WorkerAppeara
     hairColor: pick(HAIR_COLORS, 2),
     hatStyle: pick(hatStyles, 4),
     hatColor: owner === 'player' ? vest : '#FF4D4F',
-    hasGlasses: (seed !== undefined ? seed % 3 === 0 : Math.random() < 0.28),
+    hasGlasses: seed !== undefined ? seed % 3 === 0 : Math.random() < 0.28,
   };
 }
 
@@ -74,9 +74,9 @@ export function createStarterWorker(): WorkerProfile {
       hatColor: '#00D4FF',
       hasGlasses: false,
     },
-    speed: 1.05,
+    speed: 1.08,
     quality: 1.05,
-    salaryPerMin: 16,
+    salaryPerMin: 600,
     morale: 1.0,
     level: 1,
     xp: 0,
@@ -96,7 +96,7 @@ export function createCompetitorWorkers(count: number): WorkerProfile[] {
     appearance: createAppearance('competitor', idx * 7 + 1),
     speed: 1.0 + idx * 0.08,
     quality: 1.0 + idx * 0.06,
-    salaryPerMin: 18,
+    salaryPerMin: 680,
     morale: 1.0,
     level: 2,
     xp: 0,
@@ -121,10 +121,10 @@ export function generateHireCandidates(count = 4, reputation = 3.5): HireCandida
 
     const tierRoll = Math.random() + Math.max(0, (reputation - 3.0) * 0.15);
     const level = tierRoll > 1.05 ? 3 : tierRoll > 0.65 ? 2 : 1;
-    const speed = +(0.85 + level * 0.14 + Math.random() * 0.22).toFixed(2);
-    const quality = +(0.85 + level * 0.12 + Math.random() * 0.24).toFixed(2);
-    const salaryPerMin = Math.round(12 + (speed + quality) * 5.5 + level * 2);
-    const hireCost = Math.round((130 + level * 95 + (speed + quality) * 55) / 10) * 10;
+    const speed = +(0.88 + level * 0.14 + Math.random() * 0.22).toFixed(2);
+    const quality = +(0.88 + level * 0.12 + Math.random() * 0.24).toFixed(2);
+    const salaryPerMin = Math.round((450 + (speed + quality) * 200 + level * 75) / 50) * 50;
+    const hireCost = Math.round((4800 + level * 3500 + (speed + quality) * 2000) / 500) * 500;
 
     nextWorkerCounter += 1;
     result.push({
@@ -144,9 +144,9 @@ export function generateHireCandidates(count = 4, reputation = 3.5): HireCandida
 }
 
 export function getTrainingCost(worker: WorkerProfile): number {
-  return Math.round((120 * Math.pow(1.42, worker.level - 1)) / 10) * 10;
+  return Math.round((4500 * Math.pow(1.42, worker.level - 1)) / 500) * 500;
 }
 
 export function getRaiseAmount(worker: WorkerProfile): number {
-  return Math.max(4, Math.round(worker.salaryPerMin * 0.18));
+  return Math.max(100, Math.round((worker.salaryPerMin * 0.18) / 50) * 50);
 }

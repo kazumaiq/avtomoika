@@ -48,6 +48,21 @@ export type ActivePanel =
   | 'settings';
 
 export type AdCampaignId = 'none' | 'flyers' | 'billboard' | 'radio';
+export type CityEventId = 'rain_aftermath' | 'rush_hour' | 'car_blogger' | 'vip_convoy';
+
+export interface ActiveCityEvent {
+  id: CityEventId;
+  remainingSec: number;
+  totalSec: number;
+}
+
+export interface ToastNotification {
+  id: string;
+  title: string;
+  subtitle?: string;
+  tone: 'cyan' | 'emerald' | 'amber' | 'coral' | 'vip';
+  createdAt: number;
+}
 
 export interface Vec3 {
   x: number;
@@ -68,6 +83,8 @@ export interface VehicleEntity {
   category: VehicleCategory;
   modelName: string;
   appearance: VehicleAppearance;
+  isVip: boolean;
+  lastBoostAt: number;
   state: VehicleState;
   washStage: WashStage;
   x: number;
@@ -113,11 +130,11 @@ export interface WorkerProfile {
   name: string;
   roleTitle: string;
   appearance: WorkerAppearance;
-  /** 0.7 - 2.2 wash speed multiplier */
+  /** 0.7 - 2.4 wash speed multiplier */
   speed: number;
-  /** 0.7 - 2.2 quality / tip multiplier */
+  /** 0.7 - 2.4 quality / tip multiplier */
   quality: number;
-  /** Salary paid per in-game minute */
+  /** Salary paid per in-game minute (in Rubles) */
   salaryPerMin: number;
   /** Morale 0.5 - 1.35 boosted by raises */
   morale: number;
@@ -208,8 +225,14 @@ export interface EconomyMetrics {
   carsWashed: number;
   carsLost: number;
   reputation: number; // 1.0 .. 5.0
-  washPrice: number;
+  washPrice: number; // in Rubles
   adCampaign: AdCampaignId;
+  combo: number;
+  bestCombo: number;
+  dailyRevenue: number;
+  dailyCars: number;
+  happyHourRemaining: number;
+  happyHourCooldown: number;
   history: Array<{
     minute: number;
     playerRev: number;
@@ -254,4 +277,6 @@ export interface SavePayload {
   workers: WorkerProfile[];
   competitor: CompetitorState;
   settings: GameSettings;
+  claimedQuestIds: string[];
+  tutorialCompleted: boolean;
 }

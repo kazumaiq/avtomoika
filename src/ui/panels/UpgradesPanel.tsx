@@ -1,6 +1,7 @@
 import { ArrowUpRight, CheckCircle2, Wrench, X } from 'lucide-react';
 import { UPGRADE_DEFINITIONS, getUpgradeCost } from '../../config/upgrades';
 import { useGameStore } from '../../store/useGameStore';
+import { formatRub } from '../../utils/currency';
 
 export function UpgradesPanel() {
   const upgrades = useGameStore((s) => s.upgrades);
@@ -28,7 +29,10 @@ export function UpgradesPanel() {
           const canAfford = !isMax && balance >= cost;
 
           return (
-            <div key={def.key} className="ui-card">
+            <div
+              key={def.key}
+              className={`ui-card ${canAfford ? 'upgrade-affordable' : ''}`}
+            >
               <div className="ui-card-row">
                 <div>
                   <div className="card-title">{def.title}</div>
@@ -65,7 +69,8 @@ export function UpgradesPanel() {
                     disabled={!canAfford}
                     onClick={() => buyUpgrade(def.key)}
                   >
-                    <ArrowUpRight size={14} />${cost.toLocaleString('ru-RU')}
+                    <ArrowUpRight size={14} />
+                    {formatRub(cost)}
                   </button>
                 )}
               </div>
