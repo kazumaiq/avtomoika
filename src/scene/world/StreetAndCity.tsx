@@ -31,8 +31,7 @@ const SURROUNDING_BUILDINGS: BuildingSpec[] = [
   { x: -48, z: 22, w: 12, h: 22, d: 16, wall: '#4B4E6D', roof: '#191D2A', windowGlow: '#FFCA6B', seed: 3 },
   { x: -49, z: -20, w: 14, h: 25, d: 16, wall: '#8F4D3F', roof: '#222634', windowGlow: '#FFE399', seed: 4 },
 
-  // East block (corner diner, auto parts shop, lofts)
-  { x: 34, z: 19, w: 12, h: 11, d: 15, wall: '#C86B43', roof: '#262B3A', windowGlow: '#FFE082', seed: 5, hasRoofSign: true, signColor: '#00D4FF' },
+  // East block (Tax Office occupies x=34, z=19)
   { x: 35, z: -18, w: 13, h: 16, d: 16, wall: '#3F6373', roof: '#1C2230', windowGlow: '#A5F3FC', seed: 6, hasWaterTower: true },
   { x: 49, z: 20, w: 14, h: 24, d: 16, wall: '#465270', roof: '#181C28', windowGlow: '#FFD27A', seed: 7 },
   { x: 50, z: -19, w: 13, h: 20, d: 15, wall: '#9E4C58', roof: '#202432', windowGlow: '#FFE196', seed: 8 },
@@ -347,6 +346,9 @@ export function StreetAndCity() {
       {SURROUNDING_BUILDINGS.map((b, idx) => (
         <CityBuilding key={idx} spec={b} />
       ))}
+
+      {/* Physical 3D Tax Office (НАЛОГОВАЯ • ФНС) */}
+      <TaxOfficeBuilding />
     </group>
   );
 }
@@ -413,6 +415,86 @@ function CityBuilding({ spec }: { spec: BuildingSpec }) {
           />
         </mesh>
       )}
+    </group>
+  );
+}
+
+function TaxOfficeBuilding() {
+  const setActivePanel = useGameStore((s) => s.setActivePanel);
+  const signTex = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#0F1B33';
+      ctx.fillRect(0, 0, 512, 128);
+      ctx.strokeStyle = '#F59E0B';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(5, 5, 502, 118);
+      ctx.fillStyle = '#FDE68A';
+      ctx.font = '900 44px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('НАЛОГОВАЯ • ФНС', 256, 66);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      signTex.dispose();
+    };
+  }, [signTex]);
+
+  return (
+    <group
+      position={[34, 0, 19]}
+      onClick={(e) => {
+        e.stopPropagation();
+        setActivePanel('business');
+      }}
+    >
+      {/* Marble plinth */}
+      <mesh position={[0, 0.4, 0]} receiveShadow>
+        <boxGeometry args={[12.8, 0.8, 15.2]} />
+        <meshStandardMaterial color="#CBD5E1" roughness={0.78} />
+      </mesh>
+      {/* Main civic building body */}
+      <mesh position={[0, 5.4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[11.8, 9.2, 14]} />
+        <meshStandardMaterial color="#E2E8F0" roughness={0.75} />
+      </mesh>
+      {/* Roof cornice */}
+      <mesh position={[0, 10.3, 0]}>
+        <boxGeometry args={[12.6, 0.8, 14.8]} />
+        <meshStandardMaterial color="#1E293B" roughness={0.65} />
+      </mesh>
+      {/* 4 front neoclassical columns facing the road (-Z) */}
+      {[-3.8, -1.3, 1.3, 3.8].map((cx) => (
+        <mesh key={cx} position={[cx, 5.2, -7.25]} castShadow>
+          <cylinderGeometry args={[0.36, 0.42, 8.8, 10]} />
+          <meshStandardMaterial color="#F8FAFC" roughness={0.55} />
+        </mesh>
+      ))}
+      {/* Glowing НАЛОГОВАЯ • ФНС sign facing the street */}
+      <mesh position={[0, 8.9, -7.35]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[8.8, 2.2]} />
+        <meshStandardMaterial
+          map={signTex}
+          emissive="#F59E0B"
+          emissiveMap={signTex}
+          emissiveIntensity={0.45}
+          roughness={0.35}
+        />
+      </mesh>
+      {/* Entrance door */}
+      <mesh position={[0, 2.1, -7.06]}>
+        <boxGeometry args={[2.8, 3.4, 0.16]} />
+        <meshStandardMaterial color="#1E293B" roughness={0.4} metalness={0.35} />
+      </mesh>
     </group>
   );
 }

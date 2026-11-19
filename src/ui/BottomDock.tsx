@@ -1,5 +1,6 @@
 import {
   Briefcase,
+  Building2,
   Camera,
   Settings,
   Swords,
@@ -26,6 +27,7 @@ export function BottomDock() {
   const candidates = useGameStore((s) => s.candidates);
   const compPromo = useGameStore((s) => s.competitor.promoActive);
   const happyHourRemaining = useGameStore((s) => s.economy.happyHourRemaining);
+  const bizCount = useGameStore((s) => s.empire.businesses.length);
 
   const setActivePanel = useGameStore((s) => s.setActivePanel);
   const setCameraPreset = useGameStore((s) => s.setCameraPreset);
@@ -64,6 +66,13 @@ export function BottomDock() {
       badgeTone: 'amber',
     },
     {
+      id: 'empire',
+      label: 'Империя',
+      icon: Building2,
+      badge: bizCount > 0 ? bizCount : undefined,
+      badgeTone: 'emerald',
+    },
+    {
       id: 'staff',
       label: 'Персонал',
       icon: Users,
@@ -72,14 +81,14 @@ export function BottomDock() {
     },
     {
       id: 'upgrades',
-      label: 'Улучшения',
+      label: 'Развитие',
       icon: Wrench,
       badge: affordableUpgrades > 0 ? affordableUpgrades : undefined,
       badgeTone: 'coral',
     },
     {
       id: 'competitor',
-      label: 'Конкурент',
+      label: 'Рынок',
       icon: Swords,
       badge: compPromo ? '!' : undefined,
       badgeTone: 'coral',

@@ -5,8 +5,8 @@ export const WASH_PRICE_MIN = 500;
 export const WASH_PRICE_MAX = 2200;
 export const WASH_PRICE_STEP = 50;
 export const WASH_PRICE_DEFAULT = 850;
-export const BAY_UTILITY_PER_MIN = 1_100;
-export const WASH_UTILITY_COST = 190;
+export const BAY_UTILITY_PER_MIN = 420;
+export const WASH_UTILITY_COST = 115;
 export const WAX_BONUS_PER_LEVEL = 75;
 export const LOUNGE_TIP_PER_LEVEL = 55;
 

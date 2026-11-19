@@ -58,6 +58,10 @@ export function ShiftSummaryModal() {
               </div>
             </div>
 
+            <div style={{ fontSize: 11.5, color: '#94a3b8', margin: '0 0 12px', textAlign: 'center' }}>
+              Расходы: {formatRub(summary.expenses)} • Налоги: {formatRub(summary.taxes)}
+            </div>
+
             <button
               id="btn-next-shift"
               className="btn-primary start-btn-lg"

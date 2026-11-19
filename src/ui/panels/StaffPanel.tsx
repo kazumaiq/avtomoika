@@ -1,5 +1,16 @@
-import { Award, RefreshCw, RussianRuble, Trash2, UserPlus, Users, X } from 'lucide-react';
+import {
+  Award,
+  Briefcase,
+  Coffee,
+  RefreshCw,
+  RussianRuble,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
+import { SPECIALIST_CATALOG } from '../../config/empire';
 import { getRaiseAmount, getTrainingCost } from '../../config/staff';
 import { useGameStore } from '../../store/useGameStore';
 import { formatRub, formatRubPerMin } from '../../utils/currency';
@@ -7,7 +18,8 @@ import { formatRub, formatRubPerMin } from '../../utils/currency';
 export function StaffPanel() {
   const workers = useGameStore((s) => s.workers);
   const candidates = useGameStore((s) => s.candidates);
-  const balance = useGameStore((s) => s.economy.balance);
+  const economy = useGameStore((s) => s.economy);
+  const empire = useGameStore((s) => s.empire);
   const unlockedBays = useGameStore((s) => s.upgrades.bays);
   const tutorialActive = useGameStore((s) => s.tutorialActive);
   const tutorialStep = useGameStore((s) => s.tutorialStep);
@@ -16,15 +28,20 @@ export function StaffPanel() {
   const fireWorker = useGameStore((s) => s.fireWorker);
   const trainWorker = useGameStore((s) => s.trainWorker);
   const giveWorkerRaise = useGameStore((s) => s.giveWorkerRaise);
+  const restWorkers = useGameStore((s) => s.restWorkers);
   const assignWorkerBay = useGameStore((s) => s.assignWorkerBay);
   const refreshCandidates = useGameStore((s) => s.refreshCandidates);
+  const hireSpecialist = useGameStore((s) => s.hireSpecialist);
+  const fireSpecialist = useGameStore((s) => s.fireSpecialist);
   const setSelection = useGameStore((s) => s.setSelection);
   const setActivePanel = useGameStore((s) => s.setActivePanel);
 
-  // During tutorial step 1 ("Hire a second worker"), open directly on the Hire tab for frictionless UX
-  const [tab, setTab] = useState<'team' | 'hire'>(
+  const [tab, setTab] = useState<'team' | 'specialists' | 'hire'>(
     tutorialActive && tutorialStep === 1 ? 'hire' : 'team'
   );
+
+  const restCost = workers.length * 1_200;
+  const anyTired = workers.some((w) => w.fatigue > 25);
 
   return (
     <div className="panel-sheet">
@@ -44,7 +61,13 @@ export function StaffPanel() {
             className={`seg-btn ${tab === 'team' ? 'active' : ''}`}
             onClick={() => setTab('team')}
           >
-            Команда ({workers.length})
+            Мойщики ({workers.length})
+          </button>
+          <button
+            className={`seg-btn ${tab === 'specialists' ? 'active' : ''}`}
+            onClick={() => setTab('specialists')}
+          >
+            <Briefcase size={12} /> Штат ({empire.specialists.filter((s) => s.hired).length}/6)
           </button>
           <button
             className={`seg-btn ${tab === 'hire' ? 'active' : ''}`}
@@ -54,8 +77,18 @@ export function StaffPanel() {
           </button>
         </div>
 
-        {tab === 'team' ? (
+        {tab === 'team' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {anyTired && (
+              <button
+                className="btn-secondary"
+                disabled={economy.balance < restCost}
+                onClick={restWorkers}
+              >
+                <Coffee size={14} /> Кофе-брейк команде (усталость → 0%) • {formatRub(restCost)}
+              </button>
+            )}
+
             {workers.map((w) => {
               const trainCost = getTrainingCost(w);
               const raiseAmt = getRaiseAmount(w);
@@ -109,7 +142,6 @@ export function StaffPanel() {
                     </button>
                   </div>
 
-                  {/* Stats line */}
                   <div className="ui-card-row" style={{ fontSize: 12 }}>
                     <span className="card-sub">
                       Скорость: <strong style={{ color: '#00d4ff' }}>{w.speed.toFixed(2)}x</strong>
@@ -118,16 +150,17 @@ export function StaffPanel() {
                       Качество: <strong style={{ color: '#22c55e' }}>{w.quality.toFixed(2)}x</strong>
                     </span>
                     <span className="card-sub">
-                      Мораль: <strong style={{ color: '#ffb800' }}>{Math.round(w.morale * 100)}%</strong>
+                      Усталость:{' '}
+                      <strong style={{ color: w.fatigue > 65 ? '#ff3b5c' : '#ffb800' }}>
+                        {Math.round(w.fatigue)}%
+                      </strong>
                     </span>
                   </div>
 
-                  {/* XP Bar */}
                   <div className="progress-track">
                     <div className="progress-fill" style={{ width: `${xpPct}%`, background: '#ffb800' }} />
                   </div>
 
-                  {/* Bay assignment */}
                   <div className="ui-card-row">
                     <span className="card-sub">Назначение:</span>
                     <select
@@ -154,12 +187,11 @@ export function StaffPanel() {
                     </select>
                   </div>
 
-                  {/* Train & Raise actions */}
                   <div className="ui-card-row" style={{ gap: 6 }}>
                     <button
                       className="btn-primary"
                       style={{ flex: 1, height: 32, fontSize: 12 }}
-                      disabled={w.level >= 10 || balance < trainCost}
+                      disabled={w.level >= 10 || economy.balance < trainCost}
                       onClick={() => trainWorker(w.id)}
                     >
                       <Award size={13} />
@@ -179,7 +211,55 @@ export function StaffPanel() {
               );
             })}
           </div>
-        ) : (
+        )}
+
+        {tab === 'specialists' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {SPECIALIST_CATALOG.map((spec) => {
+              const st = empire.specialists.find((x) => x.role === spec.role);
+              const hired = Boolean(st?.hired);
+              const levelOk = economy.entrepreneurLevel >= spec.unlockLevel;
+              return (
+                <div
+                  key={spec.role}
+                  className="ui-card"
+                  style={hired ? { borderColor: '#22c55e', background: 'rgba(34,197,94,0.08)' } : undefined}
+                >
+                  <div className="ui-card-row">
+                    <div>
+                      <div className="card-title">{spec.title}</div>
+                      <div className="card-sub">
+                        {spec.defaultName} • ЗП {formatRubPerMin(spec.salaryPerMin)}
+                      </div>
+                    </div>
+                    {hired ? (
+                      <button
+                        className="btn-secondary"
+                        style={{ color: '#ff6b84' }}
+                        onClick={() => fireSpecialist(spec.role)}
+                      >
+                        Уволить
+                      </button>
+                    ) : (
+                      <button
+                        className="btn-primary"
+                        disabled={!levelOk || economy.balance < spec.hireCost}
+                        onClick={() => hireSpecialist(spec.role)}
+                      >
+                        {!levelOk ? `Ур. ${spec.unlockLevel}` : formatRub(spec.hireCost)}
+                      </button>
+                    )}
+                  </div>
+                  <div className="card-sub" style={{ color: '#cbd5e1' }}>
+                    {spec.subtitle}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {tab === 'hire' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div className="ui-card-row">
               <span className="section-label">Доступные кандидаты</span>
@@ -190,7 +270,7 @@ export function StaffPanel() {
             </div>
 
             {candidates.map((cand) => {
-              const canAfford = balance >= cand.hireCost && workers.length < 8;
+              const canAfford = economy.balance >= cand.hireCost && workers.length < 8;
               return (
                 <div
                   key={cand.id}

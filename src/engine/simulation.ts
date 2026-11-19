@@ -1,18 +1,8 @@
 import { soundEngine } from '../audio/soundEngine';
+import { DISTRICTS, WEATHER_SPECS } from '../config/empire';
 import { CITY_EVENTS } from '../config/progression';
 import { createCompetitorWorkers } from '../config/staff';
-import {
-  AD_CAMPAIGNS,
-  BAY_UTILITY_PER_MIN,
-  LOUNGE_TIP_PER_LEVEL,
-  WASH_UTILITY_COST,
-  WAX_BONUS_PER_LEVEL,
-  getEquipmentSpeedMultiplier,
-  getFairWashPrice,
-  getMaxQueueCapacity,
-  getPlayerQualityScore,
-  getUtilityDiscount,
-} from '../config/upgrades';
+import { getMaxQueueCapacity } from '../config/upgrades';
 import { VEHICLE_SPECS, pickVehicleForReputation } from '../config/vehicles';
 import {
   getBayGreetingPoint,
@@ -23,7 +13,9 @@ import type {
   ActiveCityEvent,
   CityEventId,
   CompetitorState,
+  CustomerSegment,
   EconomyMetrics,
+  EmpireState,
   FloatingPopup,
   OwnerSide,
   ToastNotification,
@@ -31,21 +23,41 @@ import type {
   Vec3,
   VehicleEntity,
   WashStage,
+  WeatherType,
   WorkerProfile,
   WorkerRuntime,
 } from '../types/game';
 import { formatRub } from '../utils/currency';
+import {
+  type WashPayoutBreakdown,
+  calculateMarketDemand,
+  calculateWashPayout,
+  getEffectivePlayerWashSpeed,
+  getVehicleCategoryForSegment,
+  pickCustomerSegment,
+} from './economyEngine';
 import { buildSmoothPath, distanceXZ, lerpAngle, normalizeAngle } from './pathing';
 
 export const SHIFT_START_TIME = 7 / 24; // 07:00 morning
 export const SHIFT_END_TIME = 22 / 24; // 22:00 evening close
 export const SHIFT_DURATION_SEC = 180; // 3 real minutes per work shift at 1x speed
 
+export interface EconomyTickPayload {
+  fractionOfMinute: number;
+  playerWashUtility: number;
+  playerMinuteRev: number;
+  compMinuteRev: number;
+  compCarsWashed: number;
+  playerShare: number;
+  playerQuality: number;
+}
+
 export interface SimulationCallbacks {
   getEconomy: () => EconomyMetrics;
   getUpgrades: () => UpgradeLevels;
   getPlayerWorkers: () => WorkerProfile[];
   getCompetitor: () => CompetitorState;
+  getEmpire: () => EmpireState;
   getDay: () => number;
   getTimeOfDay: () => number;
   getTimeMode: () => string;
@@ -53,24 +65,21 @@ export interface SimulationCallbacks {
   getActiveEvent: () => ActiveCityEvent | null;
   getStarted: () => boolean;
   onPlayerWashComplete: (
-    payment: number,
+    breakdown: WashPayoutBreakdown,
     repDelta: number,
     workerId: string | null,
-    isVip: boolean
+    isVip: boolean,
+    segment: CustomerSegment
   ) => void;
   onPlayerCarLost: (repDelta: number) => void;
   onCompetitorWashComplete: (payment: number) => void;
-  onEconomyMinuteTick: (
-    playerUtilityCost: number,
-    playerSalaryCost: number,
-    playerAdCost: number,
-    playerMinuteRev: number,
-    compMinuteRev: number
-  ) => void;
+  onEconomyMinuteTick: (payload: EconomyTickPayload) => void;
   onTimeAdvance: (newTimeOfDay: number, minuteDelta: number, dtSec: number) => void;
   onShiftComplete: () => void;
   onCompetitorUpdate: (patch: Partial<CompetitorState>) => void;
   onCityEventUpdate: (event: ActiveCityEvent | null) => void;
+  onWeatherChange: (weather: WeatherType) => void;
+  onTriggerTaxAudit: () => void;
   onToast: (title: string, subtitle: string | undefined, tone: ToastNotification['tone']) => void;
   onEntityListChanged: () => void;
 }
@@ -93,18 +102,17 @@ class GameSimulation {
   public liveTimeOfDay = SHIFT_START_TIME;
 
   private callbacks: SimulationCallbacks | null = null;
-  private spawnTimer = 1.0;
-  private eventCooldown = 36;
+  private spawnTimer = 1.2;
+  private eventCooldown = 44;
   private activeEventTimer = 0;
   private lastSyncedEventSec = -1;
-  private compAiTimer = 15;
-  private compInvestedTier = 0;
   private uiSyncAccum = 0;
   private pendingMinuteDelta = 0;
   private pendingDtSec = 0;
   private minuteAccumulator = 0;
   private minutePlayerRev = 0;
   private minuteCompRev = 0;
+  private minuteCompCars = 0;
   private minutePlayerUtility = 0;
   private entityCounter = 1;
   private initialized = false;
@@ -134,18 +142,17 @@ class GameSimulation {
     this.pendingBursts = [];
     this.competitorWorkers = createCompetitorWorkers(2);
     this.liveTimeOfDay = SHIFT_START_TIME;
-    this.spawnTimer = 0.8;
-    this.eventCooldown = 36;
+    this.spawnTimer = 1.0;
+    this.eventCooldown = 44;
     this.activeEventTimer = 0;
     this.lastSyncedEventSec = -1;
-    this.compAiTimer = 15;
-    this.compInvestedTier = 0;
     this.uiSyncAccum = 0;
     this.pendingMinuteDelta = 0;
     this.pendingDtSec = 0;
     this.minuteAccumulator = 0;
     this.minutePlayerRev = 0;
     this.minuteCompRev = 0;
+    this.minuteCompCars = 0;
     this.minutePlayerUtility = 0;
     this.initialized = false;
     if (this.callbacks) {
@@ -255,92 +262,48 @@ class GameSimulation {
     ).length;
   }
 
-  public getPlayerAttractionShare(): number {
-    if (!this.callbacks) return 0.5;
+  public getMarketDemand() {
+    if (!this.callbacks) return null;
     const eco = this.callbacks.getEconomy();
     const upgrades = this.callbacks.getUpgrades();
     const comp = this.callbacks.getCompetitor();
-
-    const pScore = this.computeAttractionScore('player', eco, upgrades, comp);
-    const cScore = this.computeAttractionScore('competitor', eco, upgrades, comp);
-    const total = pScore + cScore;
-    if (total <= 0.001) return 0.5;
-    return Math.min(0.84, Math.max(0.12, pScore / total));
+    const empire = this.callbacks.getEmpire();
+    return calculateMarketDemand({
+      districtId: empire.activeDistrict,
+      day: this.callbacks.getDay(),
+      hourOfDay: this.liveTimeOfDay * 24,
+      weather: empire.weather,
+      activeEvent: this.callbacks.getActiveEvent(),
+      playerEco: eco,
+      playerUpgrades: upgrades,
+      playerQueueLen: this.getQueueCount('player'),
+      comp,
+      compQueueLen: this.getQueueCount('competitor'),
+      hasCrmResearch: empire.unlockedResearchIds.includes('crm_loyalty'),
+      hasMarketer: empire.specialists.some((s) => s.role === 'marketer' && s.hired),
+      hasGasStation: empire.businesses.some((b) => !b.underConstruction && b.type === 'gas_station'),
+      hasParking: empire.businesses.some((b) => !b.underConstruction && b.type === 'parking'),
+    });
   }
 
-  private computeAttractionScore(
-    owner: OwnerSide,
-    eco: EconomyMetrics,
-    upgrades: UpgradeLevels,
-    comp: CompetitorState
-  ): number {
-    const queueLen = this.getQueueCount(owner);
-    const playerEffPrice = eco.happyHourRemaining > 0 ? eco.washPrice * 0.85 : eco.washPrice;
-    const compEffPrice = comp.promoActive ? comp.price * 0.78 : comp.price;
-
-    if (owner === 'player') {
-      const quality = getPlayerQualityScore(upgrades);
-      const fairPrice = getFairWashPrice(quality, eco.reputation);
-      // True multiplicative price elasticity: overpricing sharply drives customers to TURBO SHINE!
-      const priceMult =
-        playerEffPrice <= fairPrice
-          ? Math.min(1.22, 1 + ((fairPrice - playerEffPrice) / fairPrice) * 0.45)
-          : Math.max(0.14, Math.pow(fairPrice / playerEffPrice, 2.35));
-
-      const priceGapBonus = Math.max(
-        -0.65,
-        Math.min(0.55, (compEffPrice - playerEffPrice) / 420)
-      );
-      const repFactor = 0.65 + eco.reputation * 0.48;
-      const qualityFactor = 0.6 + quality * 0.42;
-      const bayPresence = (upgrades.bays - 1) * 0.24;
-      const adBoost = AD_CAMPAIGNS[eco.adCampaign].demandBoost;
-      const happyBoost = eco.happyHourRemaining > 0 ? 0.95 : 0;
-      const queuePenalty = Math.max(
-        0.24,
-        1 - queueLen * (0.115 - (upgrades.vipLounge - 1) * 0.018)
-      );
-      const baseDesire = Math.max(
-        0.3,
-        repFactor + qualityFactor + bayPresence + adBoost + happyBoost + priceGapBonus
-      );
-      return Math.max(0.15, baseDesire * priceMult * queuePenalty);
-    } else {
-      const fairPrice = getFairWashPrice(comp.quality, comp.reputation);
-      const priceMult =
-        compEffPrice <= fairPrice
-          ? Math.min(1.24, 1 + ((fairPrice - compEffPrice) / fairPrice) * 0.48)
-          : Math.max(0.22, Math.pow(fairPrice / compEffPrice, 2.1));
-
-      const priceGapBonus = Math.max(
-        -0.55,
-        Math.min(0.7, (playerEffPrice - compEffPrice) / 420)
-      );
-      const repFactor = 0.65 + comp.reputation * 0.48;
-      const qualityFactor = 0.6 + comp.quality * 0.42;
-      const bayPresence = (comp.bays - 1) * 0.28;
-      // During -22% promo, TURBO SHINE also runs a local ad blitz to steal customers back!
-      const promoBlitz = comp.promoActive ? 1.15 : 0.25;
-      const queuePenalty = Math.max(0.26, 1 - queueLen * 0.11);
-      const baseDesire = Math.max(
-        0.35,
-        repFactor + qualityFactor + bayPresence + promoBlitz + priceGapBonus
-      );
-      return Math.max(0.2, baseDesire * priceMult * queuePenalty);
-    }
+  public getPlayerAttractionShare(): number {
+    return this.getMarketDemand()?.playerShare ?? 0.5;
   }
 
   /**
-   * Interactive hands-on turbo wash boost triggered by the player!
+   * Interactive hands-on turbo wash boost triggered by the player.
+   * Anti-exploit capped: max 2 boosts per car, +10% each, 3.0s cooldown.
    */
   public boostVehicleWash(vehicleId: string): boolean {
     const car = this.vehicles.find((v) => v.id === vehicleId);
     if (!car || car.owner !== 'player' || car.state !== 'washing') return false;
+    if (car.boostCount >= 2) return false;
     const now = performance.now();
-    if (now - car.lastBoostAt < 750) return false;
+    if (now - car.lastBoostAt < 3000) return false;
 
     car.lastBoostAt = now;
-    car.washProgress = Math.min(0.99, car.washProgress + 0.15);
+    car.boostCount += 1;
+    car.washProgress = Math.min(0.98, car.washProgress + 0.1);
     car.sparkleTimer = Math.max(car.sparkleTimer, 0.9);
     this.pendingBursts.push({
       x: car.x,
@@ -350,7 +313,7 @@ class GameSimulation {
       isVip: car.isVip,
     });
     soundEngine.playTurboSplash();
-    this.addPopup(car.x, 2.45, car.z, '⚡ +15%', '#00D4FF');
+    this.addPopup(car.x, 2.45, car.z, '⚡ +10%', '#00D4FF');
     return true;
   }
 
@@ -373,6 +336,7 @@ class GameSimulation {
 
   public step(rawDt: number, speedMultiplier: number): void {
     if (!this.callbacks || speedMultiplier <= 0) return;
+    // Strict dt clamp prevents tab-switch bursts and guarantees 1x/2x/3x per-game-minute parity
     const dt = Math.min(rawDt, 0.05) * speedMultiplier;
     if (dt <= 0) return;
 
@@ -424,10 +388,10 @@ class GameSimulation {
       this.stepCityEvents(dt);
     }
 
-    // 3. Competitor autonomous evolution & promotions
-    this.stepCompetitorAI(dt);
+    // 3. Competitor promo timer countdown (financial AI runs on 15s billing tick)
+    this.stepCompetitorPromoTimer(dt);
 
-    // 4. Vehicle spawning based on total city demand + time of day + advertising + events
+    // 4. Vehicle spawning based on finite district demand + weather + time of day + events
     this.stepSpawner(dt);
 
     // 5. Queue advancement & bay dispatching
@@ -440,7 +404,7 @@ class GameSimulation {
     // 7. Worker AI & animations
     this.stepWorkers(dt);
 
-    // 8. Economy billing cycle (every 15 seconds)
+    // 8. Economy billing cycle (every 15 in-game seconds)
     this.stepEconomyBilling(dt);
 
     // 9. Prune expired popups & splash bursts
@@ -462,7 +426,7 @@ class GameSimulation {
         this.activeEventTimer = 0;
         this.lastSyncedEventSec = -1;
         this.callbacks.onCityEventUpdate(null);
-        this.eventCooldown = 62 + Math.random() * 36;
+        this.eventCooldown = 70 + Math.random() * 40;
       } else {
         const sec = Math.ceil(this.activeEventTimer);
         if (sec !== this.lastSyncedEventSec) {
@@ -475,7 +439,26 @@ class GameSimulation {
 
     this.eventCooldown -= dt;
     if (this.eventCooldown <= 0) {
-      const pool: CityEventId[] = ['rain_aftermath', 'rush_hour', 'car_blogger', 'vip_convoy'];
+      const day = this.callbacks.getDay();
+      const pool: CityEventId[] =
+        day >= 2
+          ? [
+              'rain_aftermath',
+              'rush_hour',
+              'car_blogger',
+              'vip_convoy',
+              'weekend_boom',
+              'seasonal_mud',
+              'snowfall',
+              'water_hike',
+              'power_hike',
+              'equipment_fault',
+              'economic_crisis',
+              'tax_audit',
+              'corp_offer',
+            ]
+          : ['rain_aftermath', 'rush_hour', 'car_blogger', 'weekend_boom', 'water_hike'];
+
       const chosenId = pool[Math.floor(Math.random() * pool.length)];
       const spec = CITY_EVENTS[chosenId];
       this.activeEventTimer = spec.duration;
@@ -485,8 +468,18 @@ class GameSimulation {
         remainingSec: spec.duration,
         totalSec: spec.duration,
       });
-      soundEngine.playFanfare();
-      this.callbacks.onToast(spec.title, undefined, chosenId === 'vip_convoy' ? 'vip' : 'cyan');
+
+      if (chosenId === 'rain_aftermath') this.callbacks.onWeatherChange('after_rain');
+      else if (chosenId === 'seasonal_mud') this.callbacks.onWeatherChange('mud_season');
+      else if (chosenId === 'snowfall') this.callbacks.onWeatherChange('snow');
+
+      if (chosenId === 'tax_audit') {
+        this.callbacks.onTriggerTaxAudit();
+      } else {
+        const tone = spec.isNegative ? 'coral' : chosenId === 'vip_convoy' ? 'vip' : 'cyan';
+        if (!spec.isNegative) soundEngine.playFanfare();
+        this.callbacks.onToast(spec.title, spec.subtitle, tone);
+      }
 
       if (chosenId === 'vip_convoy' && this.vehicles.length < 16) {
         this.spawnCustomerVehicle('player', 0.15, true);
@@ -495,128 +488,34 @@ class GameSimulation {
     }
   }
 
-  private stepCompetitorAI(dt: number): void {
+  private stepCompetitorPromoTimer(dt: number): void {
     if (!this.callbacks) return;
     const comp = this.callbacks.getCompetitor();
-    const eco = this.callbacks.getEconomy();
-    const upgrades = this.callbacks.getUpgrades();
-    const day = this.callbacks.getDay();
-    const playerShare = this.getPlayerAttractionShare();
-    const playerQuality = getPlayerQualityScore(upgrades);
-
-    // 1. Reactive Promo & Price-War Blitz (-22% + ad push when losing market share!)
-    let promoActive = comp.promoActive;
-    let promoTimer = comp.promoTimer - dt;
-    if (promoTimer <= 0) {
-      if (promoActive) {
-        promoActive = false;
-        // Shorter cooldown when player is dominating so TURBO SHINE keeps pushing back!
-        promoTimer = playerShare > 0.54 ? 32 + Math.random() * 18 : 54 + Math.random() * 28;
-      } else {
-        const triggerChance = playerShare > 0.56 ? 0.78 : playerShare > 0.48 ? 0.48 : 0.25;
-        if (Math.random() < triggerChance) {
-          promoActive = true;
-          promoTimer = 38;
-          if (this.callbacks.getStarted()) {
-            this.callbacks.onToast('TURBO SHINE: акция -22%!', undefined, 'coral');
-          }
-        } else {
-          promoTimer = 36;
-        }
-      }
-      this.callbacks.onCompetitorUpdate({ promoActive, promoTimer });
+    if (!comp.promoActive) return;
+    const nextTimer = comp.promoTimer - dt;
+    if (nextTimer <= 0) {
+      this.callbacks.onCompetitorUpdate({ promoActive: false, promoTimer: 0 });
     } else {
-      comp.promoTimer = promoTimer;
-    }
-
-    // 2. Active Strategic AI every 16 seconds: pricing, bay expansion & equipment race!
-    this.compAiTimer -= dt;
-    if (this.compAiTimer > 0) return;
-    this.compAiTimer = 16;
-
-    const patch: Partial<CompetitorState> = {};
-
-    // Open Bay #3 as soon as TURBO SHINE earns 42 000 ₽ OR player expands!
-    if (
-      comp.bays < 3 &&
-      (comp.totalRevenue >= 42_000 || (upgrades.bays >= 2 && day >= 2) || upgrades.bays >= 3)
-    ) {
-      patch.bays = 3;
-      if (this.callbacks.getStarted()) {
-        this.callbacks.onToast('TURBO SHINE открыл 3-й бокс!', undefined, 'coral');
-      }
-    }
-
-    // Invest competitor profits & match player's quality/speed upgrades so rivalry stays fierce!
-    const revTier = Math.floor(comp.totalRevenue / 40_000);
-    const qualityGap = playerQuality - comp.quality;
-    if (
-      (revTier > this.compInvestedTier || qualityGap >= 0.35 || comp.lastUpgradeDay < day) &&
-      (comp.quality < 4.85 || comp.speedMultiplier < 1.95)
-    ) {
-      this.compInvestedTier = Math.max(this.compInvestedTier, revTier);
-      const qStep = qualityGap >= 0.5 ? 0.24 : 0.16;
-      const sStep = qualityGap >= 0.5 ? 0.08 : 0.05;
-      patch.quality = Math.min(4.85, +(comp.quality + qStep).toFixed(2));
-      patch.speedMultiplier = Math.min(1.95, +(comp.speedMultiplier + sStep).toFixed(2));
-      patch.lastUpgradeDay = day;
-    }
-
-    // Dynamic Price Adaptation: undercut player when trailing, maximize margin when leading!
-    const compQualityNext = patch.quality ?? comp.quality;
-    const compFair = getFairWashPrice(compQualityNext, comp.reputation);
-    let desiredPrice = comp.price;
-
-    if (playerShare > 0.54) {
-      // Fight back by undercutting the player's price (within profitable bounds)
-      const undercut = Math.max(700, Math.min(compFair, eco.washPrice - 50));
-      desiredPrice = Math.round(undercut / 50) * 50;
-    } else if (playerShare < 0.44) {
-      // Leading the street: creep price up toward fair value to grow profits faster
-      const targetUp = Math.min(1_750, compFair, eco.washPrice + 100);
-      desiredPrice = Math.round(targetUp / 50) * 50;
-    } else {
-      // Stay competitive near fair market price
-      const balanced = Math.min(compFair, Math.max(800, eco.washPrice));
-      desiredPrice = Math.round(balanced / 50) * 50;
-    }
-
-    if (desiredPrice !== comp.price) {
-      const delta = Math.max(-100, Math.min(100, desiredPrice - comp.price));
-      patch.price = Math.max(700, Math.min(1_750, Math.round((comp.price + delta) / 50) * 50));
-    }
-
-    if (Object.keys(patch).length > 0) {
-      this.callbacks.onCompetitorUpdate(patch);
+      comp.promoTimer = nextTimer;
     }
   }
 
   private stepSpawner(dt: number): void {
     if (!this.callbacks) return;
-    const eco = this.callbacks.getEconomy();
     const upgrades = this.callbacks.getUpgrades();
-    const comp = this.callbacks.getCompetitor();
-    const activeEvent = this.callbacks.getActiveEvent();
+    const demand = this.getMarketDemand();
+    const totalDemandPerMin = demand ? demand.totalDistrictDemandPerMin : 5.2;
 
-    // Feel the rhythm of the day: calm early morning, vibrant midday, lively sunset rush hour!
-    const hour = this.liveTimeOfDay * 24;
-    const timeWave =
-      hour < 9.5 ? 0.9 : hour >= 16.5 && hour <= 19.8 ? 1.2 : hour > 20.5 ? 0.92 : 1.04;
-
-    const adSpec = AD_CAMPAIGNS[eco.adCampaign];
-    const eventTraffic = activeEvent ? CITY_EVENTS[activeEvent.id].trafficMultiplier : 1.0;
-    const happyTraffic = eco.happyHourRemaining > 0 ? 1.25 : 1.0;
-    const baseInterval = 4.35 / (adSpec.trafficMultiplier * eventTraffic * happyTraffic * timeWave);
-    const bayBonus = Math.max(0.66, 1 - (upgrades.bays - 1) * 0.11);
-    const targetInterval = Math.max(1.9, baseInterval * bayBonus);
+    // Convert finite district cars/min into spawn interval
+    const targetInterval = Math.max(2.2, 60 / Math.max(1.2, totalDemandPerMin));
 
     this.spawnTimer -= dt;
     if (this.spawnTimer > 0) return;
-    this.spawnTimer = targetInterval * (0.78 + Math.random() * 0.44);
+    this.spawnTimer = targetInterval * (0.8 + Math.random() * 0.4);
 
     if (this.vehicles.length >= 16) return;
 
-    const playerShare = this.getPlayerAttractionShare();
+    const playerShare = demand ? demand.playerShare : 0.5;
     let chosenSide: OwnerSide = Math.random() < playerShare ? 'player' : 'competitor';
 
     const playerMaxQ = getMaxQueueCapacity(upgrades.queueLot);
@@ -645,51 +544,38 @@ class GameSimulation {
     );
     if (tooClose) return;
 
-    // VIP roll for player side (and high-rep competitor too!)
-    let isVip = false;
-    if (this.callbacks.getStarted()) {
-      if (chosenSide === 'player') {
-        const vipChance =
-          0.05 +
-          Math.max(0, eco.reputation - 3.5) * 0.035 +
-          (eco.adCampaign === 'radio' ? 0.04 : 0) +
-          (activeEvent ? CITY_EVENTS[activeEvent.id].vipChanceBonus : 0);
-        if (Math.random() < vipChance) {
-          isVip = true;
-        }
-      } else if (comp.reputation >= 4.0 && Math.random() < 0.06) {
-        isVip = true;
-      }
-    }
-
-    this.spawnCustomerVehicle(chosenSide, 0, isVip);
+    this.spawnCustomerVehicle(chosenSide, 0, false);
     if (chosenSide === 'player') {
       soundEngine.playCarArrival();
-      if (isVip) {
-        soundEngine.playFanfare();
-      }
     }
     this.callbacks.onEntityListChanged();
   }
 
-  private spawnCustomerVehicle(owner: OwnerSide, startProgress: number, isVip: boolean): void {
+  private spawnCustomerVehicle(owner: OwnerSide, startProgress: number, forceVip: boolean): void {
     if (!this.callbacks) return;
     const eco = this.callbacks.getEconomy();
     const comp = this.callbacks.getCompetitor();
+    const empire = this.callbacks.getEmpire();
     const activeEvent = this.callbacks.getActiveEvent();
     const layout = getSiteLayout(owner);
 
-    const rep = owner === 'player' ? (isVip ? 5.0 : eco.reputation) : comp.reputation;
-    const picked = pickVehicleForReputation(rep);
+    const rep = owner === 'player' ? eco.reputation : comp.reputation;
+    const hasDetailing =
+      owner === 'player' &&
+      empire.businesses.some((b) => !b.underConstruction && b.type === 'detailing');
+    const hasMarketer =
+      owner === 'player' && empire.specialists.some((s) => s.role === 'marketer' && s.hired);
 
-    // VIP cars always drive luxury / sports vehicles with golden accent!
-    const category = isVip
-      ? (Math.random() < 0.55 ? 'premium' : 'sports')
-      : picked.category;
+    const segment: CustomerSegment = forceVip
+      ? 'vip'
+      : pickCustomerSegment(empire.activeDistrict, rep, activeEvent, hasDetailing, hasMarketer);
+    const isVip = segment === 'vip';
+
+    const category = getVehicleCategoryForSegment(segment);
+    const picked = pickVehicleForReputation(isVip ? 5.0 : rep);
     const spec = VEHICLE_SPECS[category];
-    const modelName = isVip
-      ? spec.models[Math.floor(Math.random() * spec.models.length)] ?? 'Maybach VIP'
-      : picked.modelName;
+    const modelName =
+      spec.models[Math.floor(Math.random() * spec.models.length)] ?? picked.modelName;
     const appearance = isVip
       ? {
           primaryColor: Math.random() < 0.5 ? '#121624' : '#F8FAFC',
@@ -720,21 +606,23 @@ class GameSimulation {
           ? eco.washPrice * 0.85
           : eco.washPrice
         : comp.promoActive
-          ? comp.price * 0.78
+          ? comp.price * 0.82
           : comp.price;
-    const vipMult = isVip ? 1.75 : 1.0;
-    const expectedPrice = Math.round((basePrice * spec.priceMultiplier * vipMult) / 10) * 10;
-    const rainDirt = activeEvent?.id === 'rain_aftermath' ? 1.0 : 0.82 + Math.random() * 0.18;
+    const expectedPrice = Math.round((basePrice * spec.priceMultiplier) / 10) * 10;
+    const weatherDirt = (WEATHER_SPECS[empire.weather] ?? WEATHER_SPECS.sunny).dirtMult;
+    const dirtLevel = Math.min(1.0, (0.78 + Math.random() * 0.22) * weatherDirt);
 
     this.entityCounter += 1;
     const car: VehicleEntity = {
       id: `car-${owner[0]}-${this.entityCounter}`,
       owner,
       category,
+      segment,
       modelName: isVip ? `VIP ${modelName}` : modelName,
       appearance,
       isVip,
       lastBoostAt: 0,
+      boostCount: 0,
       state: 'approaching',
       washStage: 'none',
       x: startPt.x,
@@ -745,7 +633,7 @@ class GameSimulation {
       steerAngle: 0,
       wheelSpin: 0,
       braking: false,
-      dirtLevel: rainDirt,
+      dirtLevel,
       foamLevel: 0,
       washProgress: 0,
       patience: 1.0,
@@ -755,7 +643,7 @@ class GameSimulation {
       waypoints: smoothApproach,
       waypointIndex: startIdx + 1,
       expectedPrice,
-      washDuration: spec.baseWashSeconds * (isVip ? 0.92 : 1),
+      washDuration: spec.baseWashSeconds * (DISTRICTS[empire.activeDistrict] ? 1 : 1),
       spawnTime: performance.now(),
       sparkleTimer: 0,
     };
@@ -882,10 +770,13 @@ class GameSimulation {
         const layout = getSiteLayout(car.owner);
         car.rotationY = lerpAngle(car.rotationY, layout.queueCarRotationY, dt * 6);
 
+        const empire = this.callbacks.getEmpire();
+        const hasCrm = empire.unlockedResearchIds.includes('crm_loyalty');
+        const hasCafe = empire.businesses.some((b) => !b.underConstruction && b.type === 'cafe');
+        const patienceMult =
+          (1 + (upgrades.vipLounge - 1) * 0.24) * (hasCrm ? 1.1 : 1.0) * (hasCafe ? 1.15 : 1.0);
         const patienceRate =
-          car.owner === 'player'
-            ? 0.0115 / (1 + (upgrades.vipLounge - 1) * 0.24)
-            : 0.0125;
+          car.owner === 'player' ? 0.0115 / patienceMult : 0.0125;
         car.patience = Math.max(0, car.patience - patienceRate * dt);
         if (car.patience <= 0) {
           if (car.owner === 'player') {
@@ -1098,14 +989,24 @@ class GameSimulation {
       }
     }
 
+    const empire = this.callbacks.getEmpire();
     const workerProfile = this.getWorkerProfileById(car.assignedWorkerId);
-    const workerSpeed = workerProfile ? workerProfile.speed * workerProfile.morale : 1.0;
-    const equipSpeed =
+    const totalSpeed =
       car.owner === 'player'
-        ? getEquipmentSpeedMultiplier(upgrades) * (eco.happyHourRemaining > 0 ? 1.25 : 1.0)
-        : comp.speedMultiplier;
+        ? getEffectivePlayerWashSpeed({
+            upgrades,
+            activeWashTech: eco.activeWashTech,
+            workerSpeed: workerProfile ? workerProfile.speed : 1.0,
+            workerMorale: workerProfile ? workerProfile.morale : 1.0,
+            workerFatigue: workerProfile ? workerProfile.fatigue : 0,
+            equipmentCondition: eco.equipmentCondition,
+            happyHourActive: eco.happyHourRemaining > 0,
+            hasDispatchResearch: empire.unlockedResearchIds.includes('bay_dispatch_ai'),
+            hasManagerSpecialist: empire.specialists.some((s) => s.role === 'manager' && s.hired),
+          })
+        : (workerProfile ? workerProfile.speed * workerProfile.morale : 1.0) * comp.speedMultiplier;
 
-    const totalRate = (workerSpeed * equipSpeed) / Math.max(7.5, car.washDuration);
+    const totalRate = totalSpeed / Math.max(8.0, car.washDuration);
     car.washProgress = Math.min(1, car.washProgress + totalRate * dt);
 
     let stage: WashStage = 'greeting';
@@ -1147,36 +1048,48 @@ class GameSimulation {
       const workerQuality = workerProfile ? workerProfile.quality : 1.0;
 
       if (car.owner === 'player') {
-        const foamTip = 1 + (upgrades.foamSystem - 1) * 0.06;
-        const waxBonus = (upgrades.dryerWax - 1) * WAX_BONUS_PER_LEVEL;
-        const loungeTip = (upgrades.vipLounge - 1) * LOUNGE_TIP_PER_LEVEL;
-        const comboBonus = 1 + Math.min(0.2, Math.floor((eco.combo + 1) / 2) * 0.02);
-        const eventTip = activeEvent ? CITY_EVENTS[activeEvent.id].tipMultiplier : 1.0;
+        const spec = VEHICLE_SPECS[car.category];
+        const breakdown = calculateWashPayout({
+          washPrice: eco.washPrice,
+          happyHourActive: eco.happyHourRemaining > 0,
+          vehiclePriceMult: spec.priceMultiplier,
+          segment: car.segment,
+          isVip: car.isVip,
+          activeWashTech: eco.activeWashTech,
+          upgrades,
+          workerQuality,
+          combo: eco.combo + 1,
+          equipmentCondition: eco.equipmentCondition,
+          activeEvent,
+          weather: empire.weather,
+          hasChemShop: empire.businesses.some((b) => !b.underConstruction && b.type === 'chem_shop'),
+          hasHoldingProcurement: empire.holding.founded && empire.holding.centralProcurement,
+          hasWaterResearch: empire.unlockedResearchIds.includes('water_recovery_pro'),
+        });
+
         const eventRep = activeEvent ? CITY_EVENTS[activeEvent.id].repMultiplier : 1.0;
-
-        const rawPayment =
-          (car.expectedPrice * (0.9 + workerQuality * 0.12) * foamTip + waxBonus + loungeTip) *
-          comboBonus *
-          eventTip;
-        const payment = Math.round(rawPayment / 10) * 10;
-
         const repDiminish =
           eco.reputation > 4.65
-            ? 0.22
+            ? 0.2
             : eco.reputation > 4.25
-              ? 0.45
+              ? 0.42
               : eco.reputation > 3.85
-                ? 0.72
+                ? 0.7
                 : 1.0;
         const baseRep =
-          (car.isVip ? 0.048 : 0.015) + (upgrades.foamSystem + upgrades.vipLounge - 2) * 0.0025;
+          (car.isVip ? 0.04 : 0.014) + (upgrades.foamSystem + upgrades.vipLounge - 2) * 0.002;
         const repGain = +(baseRep * eventRep * repDiminish).toFixed(3);
-        const utilityForWash = Math.round(WASH_UTILITY_COST * getUtilityDiscount(upgrades.ecoSolar));
 
-        this.minutePlayerRev += payment;
-        this.minutePlayerUtility += utilityForWash;
+        this.minutePlayerRev += breakdown.total;
+        this.minutePlayerUtility += breakdown.utilityCost;
 
-        this.callbacks.onPlayerWashComplete(payment, repGain, car.assignedWorkerId, car.isVip);
+        this.callbacks.onPlayerWashComplete(
+          breakdown,
+          repGain,
+          car.assignedWorkerId,
+          car.isVip,
+          car.segment
+        );
 
         if (car.isVip) {
           soundEngine.playFanfare();
@@ -1187,14 +1100,15 @@ class GameSimulation {
             createdAt: performance.now(),
             isVip: true,
           });
-          this.addPopup(car.x, 2.85, car.z, `⭐ VIP ${formatRub(payment, { signed: true })}`, '#FACC15');
+          this.addPopup(car.x, 2.85, car.z, `⭐ VIP ${formatRub(breakdown.total, { signed: true })}`, '#FACC15');
         } else {
           soundEngine.playCash();
-          this.addPopup(car.x, 2.7, car.z, formatRub(payment, { signed: true }), '#22C55E');
+          this.addPopup(car.x, 2.7, car.z, formatRub(breakdown.total, { signed: true }), '#22C55E');
         }
       } else {
-        const payment = Math.round((car.expectedPrice * (0.96 + comp.quality * 0.07)) / 10) * 10;
+        const payment = Math.round((car.expectedPrice * (0.94 + comp.quality * 0.06)) / 10) * 10;
         this.minuteCompRev += payment;
+        this.minuteCompCars += 1;
         this.callbacks.onCompetitorWashComplete(payment);
         this.addPopup(car.x, 2.6, car.z, formatRub(payment, { signed: true }), '#FF9F43');
       }
@@ -1395,35 +1309,26 @@ class GameSimulation {
     const fractionOfMinute = this.minuteAccumulator / 60;
     this.minuteAccumulator = 0;
 
-    const eco = this.callbacks.getEconomy();
-    const upgrades = this.callbacks.getUpgrades();
-    const workers = this.callbacks.getPlayerWorkers();
-
-    const salaryPerMin = workers.reduce((sum, w) => sum + w.salaryPerMin, 0);
-    const adCostPerMin = AD_CAMPAIGNS[eco.adCampaign].costPerMin;
-    const baseBayUtilityPerMin =
-      upgrades.bays * BAY_UTILITY_PER_MIN * getUtilityDiscount(upgrades.ecoSolar);
-
-    const salaryCharge = Math.round(salaryPerMin * fractionOfMinute);
-    const adCharge = Math.round(adCostPerMin * fractionOfMinute);
-    const utilityCharge = Math.round(
-      baseBayUtilityPerMin * fractionOfMinute + this.minutePlayerUtility
-    );
-
-    const scaledPlayerRevPerMin = Math.round(this.minutePlayerRev / fractionOfMinute);
-    const scaledCompRevPerMin = Math.round(this.minuteCompRev / fractionOfMinute);
+    const demand = this.getMarketDemand();
+    const playerMinuteRev = this.minutePlayerRev;
+    const compMinuteRev = this.minuteCompRev;
+    const compCarsWashed = this.minuteCompCars;
+    const playerWashUtility = this.minutePlayerUtility;
 
     this.minutePlayerRev = 0;
     this.minuteCompRev = 0;
+    this.minuteCompCars = 0;
     this.minutePlayerUtility = 0;
 
-    this.callbacks.onEconomyMinuteTick(
-      utilityCharge,
-      salaryCharge,
-      adCharge,
-      scaledPlayerRevPerMin,
-      scaledCompRevPerMin
-    );
+    this.callbacks.onEconomyMinuteTick({
+      fractionOfMinute,
+      playerWashUtility,
+      playerMinuteRev,
+      compMinuteRev,
+      compCarsWashed,
+      playerShare: demand?.playerShare ?? 0.5,
+      playerQuality: demand?.playerQuality ?? 2.0,
+    });
   }
 }
 

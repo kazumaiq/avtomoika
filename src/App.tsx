@@ -12,6 +12,7 @@ import { TopHud } from './ui/TopHud';
 import { TutorialOverlay } from './ui/TutorialOverlay';
 import { BusinessPanel } from './ui/panels/BusinessPanel';
 import { CompetitorPanel } from './ui/panels/CompetitorPanel';
+import { EmpirePanel } from './ui/panels/EmpirePanel';
 import { SettingsPanel } from './ui/panels/SettingsPanel';
 import { StaffPanel } from './ui/panels/StaffPanel';
 import { UpgradesPanel } from './ui/panels/UpgradesPanel';
@@ -58,6 +59,7 @@ export function App() {
           </AnimatePresence>
 
           {activePanel === 'business' && <BusinessPanel />}
+          {activePanel === 'empire' && <EmpirePanel />}
           {activePanel === 'staff' && <StaffPanel />}
           {activePanel === 'upgrades' && <UpgradesPanel />}
           {activePanel === 'competitor' && <CompetitorPanel />}
