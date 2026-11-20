@@ -93,15 +93,19 @@ export function GameCanvas() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Tuned DPR for crisp Retina clarity + locked 60 FPS on iPhone 15 Pro even at High quality!
+  // Native Retina DPR for razor-sharp edges & zero blurriness (up to 2.5x on Ultra!)
+  const maxNativeDpr =
+    typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 2, 2.5) : 2;
   const dpr: [number, number] =
-    quality === 'high'
-      ? isPortraitMobile
-        ? [1, 1.75]
-        : [1, 2]
-      : quality === 'medium'
-        ? [1, 1.35]
-        : [0.85, 1];
+    quality === 'ultra'
+      ? [Math.min(1.75, maxNativeDpr), maxNativeDpr]
+      : quality === 'high'
+        ? isPortraitMobile
+          ? [1.35, Math.min(2, maxNativeDpr)]
+          : [1.5, Math.min(2.25, maxNativeDpr)]
+        : quality === 'medium'
+          ? [1.1, 1.5]
+          : [1, 1.15];
 
   return (
     <WebGLErrorBoundary>
@@ -111,15 +115,15 @@ export function GameCanvas() {
           dpr={dpr}
           camera={{
             position: isPortraitMobile ? [24, 24, 34] : [25, 21, 29],
-            fov: isPortraitMobile ? 52 : 44,
+            fov: isPortraitMobile ? 50 : 42,
             near: 0.5,
-            far: 250,
+            far: 260,
           }}
           gl={{
-            antialias: quality !== 'low',
+            antialias: true,
             powerPreference: 'high-performance',
-            toneMapping: THREE.ACESFilmicToneMapping,
-            toneMappingExposure: 1.15,
+            toneMapping: THREE.AgXToneMapping,
+            toneMappingExposure: 1.18,
           }}
           onPointerMissed={() => setSelection(null)}
         >

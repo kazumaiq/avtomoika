@@ -22,9 +22,10 @@ function getPopupTexture(text: string, color: string): THREE.CanvasTexture {
   }
 
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 72;
+  canvas.width = 512;
+  canvas.height = 144;
   const ctx = canvas.getContext('2d')!;
+  ctx.scale(2, 2);
 
   ctx.clearRect(0, 0, 256, 72);
 
@@ -46,20 +47,23 @@ function getPopupTexture(text: string, color: string): THREE.CanvasTexture {
   ctx.quadraticCurveTo(padX, padY, padX + r, padY);
   ctx.closePath();
 
-  ctx.fillStyle = 'rgba(10, 15, 28, 0.9)';
+  ctx.fillStyle = 'rgba(10, 15, 28, 0.94)';
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.strokeStyle = color;
   ctx.stroke();
 
   ctx.fillStyle = color;
-  ctx.font = '700 28px "Space Grotesk", system-ui, sans-serif';
+  ctx.font = '800 28px "Space Grotesk", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 128, 37, 214);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   texCache.set(key, tex);
   return tex;

@@ -1,6 +1,7 @@
 import {
   Crown,
   FastForward,
+  Film,
   Flame,
   Gift,
   Home,
@@ -65,6 +66,8 @@ export function TopHud() {
   const updateSettings = useGameStore((s) => s.updateSettings);
   const returnToTitle = useGameStore((s) => s.returnToTitle);
   const claimQuestReward = useGameStore((s) => s.claimQuestReward);
+  const watchRewardedSponsorAd = useGameStore((s) => s.watchRewardedSponsorAd);
+  const watchRewardedTurboAd = useGameStore((s) => s.watchRewardedTurboAd);
 
   const [sharePct, setSharePct] = useState(50);
 
@@ -82,6 +85,12 @@ export function TopHud() {
     Math.max(0, Math.round(((effTime - SHIFT_START_TIME) / (SHIFT_END_TIME - SHIFT_START_TIME)) * 100))
   );
   const net = economy.profitPerMin;
+
+  const grantAmount = Math.round(
+    7_000 + economy.entrepreneurLevel * 1_500 + upgrades.bays * 2_000
+  );
+  const grantCooldown = Math.ceil(economy.adGrantCooldown ?? 0);
+  const adBoostLeft = Math.ceil(economy.adBoostRemaining ?? 0);
 
   // Next active quest
   const activeQuest = QUEST_CHAIN.find((q) => !claimedQuestIds.includes(q.id)) ?? null;
@@ -205,7 +214,7 @@ export function TopHud() {
         </div>
       </header>
 
-      {/* Single Ultra-Clean Sub-Row: Quest Pill + Active Status Chips */}
+      {/* Single Ultra-Clean Sub-Row: Quest Pill + Rewarded Ad Boosters + Active Status Chips */}
       <div className="hud-sub-strip">
         {activeQuest ? (
           <button
@@ -243,6 +252,53 @@ export function TopHud() {
         )}
 
         <div className="hud-status-pills">
+          {/* Rewarded Video Ad Button: Sponsor Grant */}
+          <button
+            id="btn-ad-sponsor"
+            type="button"
+            className="event-pill amber hud-interactive"
+            style={{
+              cursor: grantCooldown > 0 ? 'default' : 'pointer',
+              opacity: grantCooldown > 0 ? 0.65 : 1,
+              background:
+                grantCooldown > 0
+                  ? 'rgba(15, 23, 42, 0.85)'
+                  : 'linear-gradient(135deg, rgba(245, 158, 11, 0.28), rgba(15, 23, 42, 0.92))',
+              borderColor: 'rgba(250, 204, 21, 0.7)',
+            }}
+            disabled={grantCooldown > 0}
+            onClick={() => void watchRewardedSponsorAd()}
+            title="Посмотреть видео за спонсорский грант и ремонт оборудования"
+          >
+            <Film size={12} color="#facc15" />
+            <span style={{ color: '#fef08a', fontWeight: 700 }}>
+              {grantCooldown > 0 ? `Грант ${grantCooldown}с` : `+${formatRub(grantAmount, { compact: true })}`}
+            </span>
+          </button>
+
+          {/* Rewarded Video Ad Button: VIP Convoy & x1.5 Turbo Wash */}
+          <button
+            id="btn-ad-vip-turbo"
+            type="button"
+            className="event-pill hud-interactive"
+            style={{
+              cursor: adBoostLeft > 0 ? 'default' : 'pointer',
+              background:
+                adBoostLeft > 0
+                  ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.28), rgba(15, 23, 42, 0.92))'
+                  : 'linear-gradient(135deg, rgba(0, 212, 255, 0.24), rgba(15, 23, 42, 0.92))',
+              borderColor: adBoostLeft > 0 ? '#4ade80' : '#00d4ff',
+            }}
+            disabled={adBoostLeft > 0}
+            onClick={() => void watchRewardedTurboAd()}
+            title="Видео за награду: ускорение мойки +50% и VIP-кортеж на 45 сек"
+          >
+            <Zap size={12} color={adBoostLeft > 0 ? '#4ade80' : '#00d4ff'} fill={adBoostLeft > 0 ? '#4ade80' : '#00d4ff'} />
+            <span style={{ color: '#e0f2fe', fontWeight: 700 }}>
+              {adBoostLeft > 0 ? `VIP ×1.5 (${adBoostLeft}с)` : 'VIP-буст 📺'}
+            </span>
+          </button>
+
           {economy.combo >= 2 && (
             <div className="combo-pill hud-interactive" title="Серия без потерь очереди">
               <Flame size={12} color="#fb923c" fill="#fb923c" />

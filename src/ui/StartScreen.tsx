@@ -21,6 +21,7 @@ export function StartScreen() {
     { id: 'low', label: 'Низкая' },
     { id: 'medium', label: 'Средняя' },
     { id: 'high', label: 'Высокая' },
+    { id: 'ultra', label: 'Ультра HD' },
   ];
 
   return (

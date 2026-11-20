@@ -30,43 +30,54 @@ export function getToonGradientTexture(): THREE.DataTexture {
   }) as THREE.DataTexture;
 }
 
+function applyCrispTextureFiltering(tex: THREE.CanvasTexture): THREE.CanvasTexture {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 16;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /**
- * Urban asphalt road texture with halftone grain, double yellow center line, and white lane edges
+ * Urban asphalt road texture with halftone grain, double yellow center line, and white lane edges (1024x1024 crisp 2x)
  */
 export function getRoadTexture(): THREE.CanvasTexture {
-  return getOrCreate('road-asphalt', () => {
+  return getOrCreate('road-asphalt-hd', () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
+    canvas.width = 1024;
+    canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(2, 2);
 
-    ctx.fillStyle = '#242936';
+    ctx.fillStyle = '#202634';
     ctx.fillRect(0, 0, 512, 512);
 
-    // Subtle painterly asphalt texture + comic Ben-Day halftone dots
-    for (let i = 0; i < 4200; i++) {
+    // Crisp micro-aggregate asphalt grain
+    for (let i = 0; i < 6500; i++) {
       const x = Math.random() * 512;
       const y = Math.random() * 512;
-      const shade = Math.random() > 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(8,10,16,0.14)';
+      const shade = Math.random() > 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(6,8,14,0.18)';
       ctx.fillStyle = shade;
-      ctx.fillRect(x, y, 3, 3);
+      ctx.fillRect(x, y, 2, 2);
     }
 
     // Halftone bands along curb gutters
-    ctx.fillStyle = 'rgba(11, 14, 24, 0.25)';
+    ctx.fillStyle = 'rgba(11, 14, 24, 0.28)';
     for (let x = 0; x < 512; x += 12) {
       for (let y = 0; y < 56; y += 12) {
         ctx.beginPath();
-        ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+        ctx.arc(x, y, 2.0, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(x, 512 - y, 2.2, 0, Math.PI * 2);
+        ctx.arc(x, 512 - y, 2.0, 0, Math.PI * 2);
         ctx.fill();
       }
     }
 
-    // White outer shoulder lines
-    ctx.fillStyle = 'rgba(235, 242, 252, 0.72)';
+    // Crisp white outer shoulder lines
+    ctx.fillStyle = 'rgba(241, 245, 249, 0.85)';
     ctx.fillRect(0, 26, 512, 8);
     ctx.fillRect(0, 478, 512, 8);
 
@@ -76,7 +87,7 @@ export function getRoadTexture(): THREE.CanvasTexture {
     ctx.fillRect(0, 260, 512, 8);
 
     // Subtle tire wear tracks
-    ctx.fillStyle = 'rgba(14, 17, 25, 0.16)';
+    ctx.fillStyle = 'rgba(10, 13, 20, 0.18)';
     ctx.fillRect(0, 105, 512, 28);
     ctx.fillRect(0, 175, 512, 28);
     ctx.fillRect(0, 310, 512, 28);
@@ -86,28 +97,27 @@ export function getRoadTexture(): THREE.CanvasTexture {
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.repeat.set(8, 1);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    return applyCrispTextureFiltering(tex);
   }) as THREE.CanvasTexture;
 }
 
 /**
- * Stylized concrete car wash lot with expansion joints & comic stipple
+ * Stylized concrete car wash lot with crisp expansion joints & fine stipple (1024x1024 HD)
  */
 export function getLotConcreteTexture(tint = '#384152'): THREE.CanvasTexture {
-  return getOrCreate(`lot-concrete-${tint}`, () => {
+  return getOrCreate(`lot-concrete-hd-${tint}`, () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
+    canvas.width = 1024;
+    canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(2, 2);
 
     ctx.fillStyle = tint;
     ctx.fillRect(0, 0, 512, 512);
 
-    // Subtle concrete panels
-    ctx.strokeStyle = 'rgba(15, 20, 30, 0.28)';
-    ctx.lineWidth = 3;
+    // Crisp concrete panels & bevel highlights
+    ctx.strokeStyle = 'rgba(12, 16, 26, 0.36)';
+    ctx.lineWidth = 2.5;
     for (let i = 0; i <= 512; i += 128) {
       ctx.beginPath();
       ctx.moveTo(i, 0);
@@ -119,39 +129,52 @@ export function getLotConcreteTexture(tint = '#384152'): THREE.CanvasTexture {
       ctx.stroke();
     }
 
-    // Halftone grain
-    for (let i = 0; i < 2400; i++) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1.2;
+    for (let i = 2; i <= 512; i += 128) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 512);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(512, i);
+      ctx.stroke();
+    }
+
+    // Fine grain
+    for (let i = 0; i < 3600; i++) {
       const x = Math.random() * 512;
       const y = Math.random() * 512;
-      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.07)';
-      ctx.fillRect(x, y, 2.5, 2.5);
+      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.08)';
+      ctx.fillRect(x, y, 1.8, 1.8);
     }
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(6, 5);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
+    return applyCrispTextureFiltering(tex);
   }) as THREE.CanvasTexture;
 }
 
 /**
- * Tiled wash bay floor with drainage grate & hazard safety border stripes
+ * Tiled wash bay floor with drainage grate & hazard safety border stripes (1024x1024 HD)
  */
 export function getBayFloorTexture(accent = '#00D4FF'): THREE.CanvasTexture {
-  return getOrCreate(`bay-floor-${accent}`, () => {
+  return getOrCreate(`bay-floor-hd-${accent}`, () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
+    canvas.width = 1024;
+    canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(2, 2);
 
-    ctx.fillStyle = '#2B3445';
+    ctx.fillStyle = '#252E3F';
     ctx.fillRect(0, 0, 512, 512);
 
     // Wet tile grid
-    ctx.strokeStyle = 'rgba(160, 210, 255, 0.14)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(160, 215, 255, 0.18)';
+    ctx.lineWidth = 1.8;
     for (let i = 0; i <= 512; i += 32) {
       ctx.beginPath();
       ctx.moveTo(i, 0);
@@ -164,11 +187,11 @@ export function getBayFloorTexture(accent = '#00D4FF'): THREE.CanvasTexture {
     }
 
     // Central steel drainage grate
-    ctx.fillStyle = '#151922';
+    ctx.fillStyle = '#11151E';
     ctx.fillRect(190, 96, 132, 320);
-    ctx.fillStyle = '#4B5563';
-    for (let y = 104; y < 410; y += 16) {
-      ctx.fillRect(198, y, 116, 6);
+    ctx.fillStyle = '#525E70';
+    for (let y = 104; y < 410; y += 14) {
+      ctx.fillRect(198, y, 116, 5);
     }
 
     // Safety yellow/black stripes along left & right edges
@@ -176,7 +199,7 @@ export function getBayFloorTexture(accent = '#00D4FF'): THREE.CanvasTexture {
     for (const sideX of [0, 476]) {
       ctx.fillStyle = '#FFB800';
       ctx.fillRect(sideX, 0, 36, 512);
-      ctx.fillStyle = '#151820';
+      ctx.fillStyle = '#12151E';
       for (let y = -40; y < 560; y += 36) {
         ctx.beginPath();
         ctx.moveTo(sideX, y);
@@ -191,20 +214,18 @@ export function getBayFloorTexture(accent = '#00D4FF'): THREE.CanvasTexture {
 
     // Accent center lane arrows
     ctx.fillStyle = accent;
-    ctx.globalAlpha = 0.55;
+    ctx.globalAlpha = 0.7;
     ctx.fillRect(58, 20, 8, 472);
     ctx.fillRect(446, 20, 8, 472);
     ctx.globalAlpha = 1;
 
     const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    return applyCrispTextureFiltering(tex);
   }) as THREE.CanvasTexture;
 }
 
 /**
- * Stylized Spider-Verse graphic sign texture (AUTOMOIKA, TURBO SHINE, Billboards)
+ * Stylized Spider-Verse graphic sign texture (AUTOMOIKA, TURBO SHINE, Billboards — 2048x512 Ultra-Crisp)
  */
 export function getSignTexture(
   text: string,
@@ -213,12 +234,13 @@ export function getSignTexture(
   accentHex: string,
   textHex = '#FFFFFF'
 ): THREE.CanvasTexture {
-  const key = `sign-${text}-${subtitle}-${bgHex}-${accentHex}`;
+  const key = `sign-hd-${text}-${subtitle}-${bgHex}-${accentHex}`;
   return getOrCreate(key, () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 256;
+    canvas.width = 2048;
+    canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(2, 2);
 
     // Deep background
     ctx.fillStyle = bgHex;
@@ -274,31 +296,30 @@ export function getSignTexture(
     ctx.fillText(subtitle, 512, 198);
 
     const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    return applyCrispTextureFiltering(tex);
   }) as THREE.CanvasTexture;
 }
 
 /**
- * Stylized urban building facade texture with glowing warm/cyan comic windows
+ * Stylized urban building facade texture with glowing warm/cyan comic windows (512x1024 HD)
  */
 export function getBuildingFacadeTexture(
   wallColor: string,
   windowGlow: string,
   seed = 1
 ): THREE.CanvasTexture {
-  return getOrCreate(`facade-${wallColor}-${windowGlow}-${seed}`, () => {
+  return getOrCreate(`facade-hd-${wallColor}-${windowGlow}-${seed}`, () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 512;
+    canvas.width = 512;
+    canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(2, 2);
 
     ctx.fillStyle = wallColor;
     ctx.fillRect(0, 0, 256, 512);
 
     // Subtle horizontal architectural bands + comic hatching
-    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
     for (let y = 0; y < 512; y += 64) {
       ctx.fillRect(0, y, 256, 6);
     }
@@ -317,15 +338,15 @@ export function getBuildingFacadeTexture(
         const lit = rand() > 0.42;
 
         // Ink frame
-        ctx.fillStyle = '#111520';
+        ctx.fillStyle = '#0F131D';
         ctx.fillRect(wx - 3, wy - 3, 42, 46);
 
         // Glass
-        ctx.fillStyle = lit ? windowGlow : '#1D2536';
+        ctx.fillStyle = lit ? windowGlow : '#1B2334';
         ctx.fillRect(wx, wy, 36, 40);
 
         // Diagonal comic glass reflection
-        ctx.fillStyle = lit ? 'rgba(255,255,255,0.32)' : 'rgba(130,190,255,0.14)';
+        ctx.fillStyle = lit ? 'rgba(255,255,255,0.36)' : 'rgba(130,190,255,0.16)';
         ctx.beginPath();
         ctx.moveTo(wx, wy + 18);
         ctx.lineTo(wx + 20, wy);
@@ -339,13 +360,12 @@ export function getBuildingFacadeTexture(
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
+    return applyCrispTextureFiltering(tex);
   }) as THREE.CanvasTexture;
 }
 
 /**
- * Dynamic glowing entrance price pylon texture showing live Ruble price
+ * Dynamic glowing entrance price pylon texture showing live Ruble price (512x1024 HD)
  */
 export function getPriceTotemTexture(
   brand: string,
@@ -353,12 +373,13 @@ export function getPriceTotemTexture(
   accentHex: string,
   promoText?: string
 ): THREE.CanvasTexture {
-  const key = `totem-${brand}-${priceRub}-${accentHex}-${promoText ?? ''}`;
+  const key = `totem-hd-${brand}-${priceRub}-${accentHex}-${promoText ?? ''}`;
   return getOrCreate(key, () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 512;
+    canvas.width = 512;
+    canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(2, 2);
 
     ctx.fillStyle = '#0D1322';
     ctx.fillRect(0, 0, 256, 512);
@@ -408,9 +429,8 @@ export function getPriceTotemTexture(
     }
 
     const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    return applyCrispTextureFiltering(tex);
   }) as THREE.CanvasTexture;
 }
+
 

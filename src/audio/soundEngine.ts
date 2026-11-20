@@ -34,6 +34,14 @@ class SoundEngine {
     }
   }
 
+  public isMuted(): boolean {
+    return this.muted;
+  }
+
+  public setMuted(muted: boolean): void {
+    this.setSettings(this.sfxVolume, this.musicVolume, muted);
+  }
+
   private getEffectiveSfx(scale = 1): number {
     if (this.muted || this.sfxVolume <= 0.01) return 0;
     return this.sfxVolume * scale;

@@ -423,10 +423,11 @@ function TaxOfficeBuilding() {
   const setActivePanel = useGameStore((s) => s.setActivePanel);
   const signTex = useMemo(() => {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 128;
+    canvas.width = 1024;
+    canvas.height = 256;
     const ctx = canvas.getContext('2d');
     if (ctx) {
+      ctx.scale(2, 2);
       ctx.fillStyle = '#0F1B33';
       ctx.fillRect(0, 0, 512, 128);
       ctx.strokeStyle = '#F59E0B';
@@ -440,6 +441,9 @@ function TaxOfficeBuilding() {
     }
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
     return tex;
   }, []);
 

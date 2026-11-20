@@ -46,7 +46,7 @@ export type WorkerActionState =
   | 'drying'
   | 'celebrating';
 
-export type GraphicsQuality = 'low' | 'medium' | 'high';
+export type GraphicsQuality = 'low' | 'medium' | 'high' | 'ultra';
 export type TimeOfDayMode = 'cycle' | 'morning' | 'day' | 'sunset' | 'night';
 export type CameraPreset = 'overview' | 'player' | 'competitor' | 'street';
 
@@ -153,6 +153,7 @@ export interface ShiftSummary {
   taxes: number;
   profit: number;
   bestCombo: number;
+  doubledByAd?: boolean;
 }
 
 export interface Vec3 {
@@ -473,6 +474,10 @@ export interface EconomyMetrics {
   dailyCars: number;
   happyHourRemaining: number;
   happyHourCooldown: number;
+  /** Rewarded Ad x2 Speed + VIP Convoy boost timer (seconds) */
+  adBoostRemaining: number;
+  /** Rewarded Ad Sponsor Cash Grant cooldown (seconds) */
+  adGrantCooldown: number;
   /** Equipment condition 0..100% */
   equipmentCondition: number;
   /** Active wash technology */

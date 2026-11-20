@@ -244,66 +244,74 @@ export function LightingAndSky() {
       scene.fog.color.copy(tmpFog);
     }
     scene.background = tmpFog;
-    scene.environmentIntensity = THREE.MathUtils.lerp(0.85, 0.48, night);
+    scene.environmentIntensity = THREE.MathUtils.lerp(1.05, 0.58, night);
 
     if (dirLightRef.current) {
       dirLightRef.current.position.set(sunX * 42, Math.max(30, sunY * 54), sunZ * 36);
       dirLightRef.current.color.copy(tmpSun);
-      dirLightRef.current.intensity = THREE.MathUtils.lerp(2.75, 1.35, night);
+      dirLightRef.current.intensity = THREE.MathUtils.lerp(2.95, 1.45, night);
     }
 
     if (hemiLightRef.current) {
       hemiLightRef.current.color.copy(tmpHemiSky);
       hemiLightRef.current.groundColor.copy(tmpHemiGnd);
-      hemiLightRef.current.intensity = THREE.MathUtils.lerp(1.65, 1.15, night);
+      hemiLightRef.current.intensity = THREE.MathUtils.lerp(1.7, 1.2, night);
     }
 
     if (rimLightRef.current) {
-      rimLightRef.current.intensity = THREE.MathUtils.lerp(0.85, 1.4, night);
+      rimLightRef.current.intensity = THREE.MathUtils.lerp(0.95, 1.5, night);
     }
   });
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
   const shadowMapSize =
-    quality === 'high' ? (isMobile ? 1024 : 2048) : quality === 'medium' ? 1024 : 512;
+    quality === 'ultra'
+      ? isMobile
+        ? 2048
+        : 4096
+      : quality === 'high'
+        ? 2048
+        : quality === 'medium'
+          ? 1024
+          : 512;
 
   return (
     <>
-      <fog attach="fog" args={['#CBE8FC', 76, 185]} />
+      <fog attach="fog" args={['#CBE8FC', 118, 245]} />
 
       {/* Stylized Shader Sky Dome with Drifting Clouds & Evening Stars */}
-      <mesh material={skyMaterial} scale={[165, 165, 165]}>
-        <sphereGeometry args={[1, 24, 18]} />
+      <mesh material={skyMaterial} scale={[185, 185, 185]}>
+        <sphereGeometry args={[1, 32, 22]} />
       </mesh>
 
-      {/* Main Key Sunlight with Expanded Shadow Frustum */}
+      {/* Main Key Sunlight with Focused High-Density Shadow Frustum */}
       <directionalLight
         ref={dirLightRef}
         position={[26, 44, -18]}
-        intensity={2.5}
+        intensity={2.8}
         castShadow={quality !== 'low'}
         shadow-mapSize-width={shadowMapSize}
         shadow-mapSize-height={shadowMapSize}
         shadow-camera-near={5}
-        shadow-camera-far={145}
-        shadow-camera-left={-54}
-        shadow-camera-right={54}
-        shadow-camera-top={54}
-        shadow-camera-bottom={-54}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.05}
-        shadow-radius={2}
+        shadow-camera-far={135}
+        shadow-camera-left={-36}
+        shadow-camera-right={36}
+        shadow-camera-top={36}
+        shadow-camera-bottom={-36}
+        shadow-bias={-0.00025}
+        shadow-normalBias={0.025}
+        shadow-radius={1}
       />
 
       {/* Rich Atmospheric Bounce Hemisphere */}
-      <hemisphereLight ref={hemiLightRef} args={['#C4EAFF', '#4A5470', 1.5]} />
+      <hemisphereLight ref={hemiLightRef} args={['#C4EAFF', '#4A5470', 1.6]} />
 
       {/* Cool Cyan Graphic Rim Light */}
       <directionalLight
         ref={rimLightRef}
         position={[-28, 22, 34]}
         color="#38BDF8"
-        intensity={0.9}
+        intensity={0.95}
       />
     </>
   );

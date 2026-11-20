@@ -2,7 +2,9 @@ import { AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
 import { soundEngine } from './audio/soundEngine';
 import { GameCanvas } from './scene/GameCanvas';
+import { adService } from './services/adService';
 import { useGameStore } from './store/useGameStore';
+import { AdVideoModal } from './ui/AdVideoModal';
 import { BottomDock } from './ui/BottomDock';
 import { SelectionInspector } from './ui/SelectionInspector';
 import { ShiftSummaryModal } from './ui/ShiftSummaryModal';
@@ -19,6 +21,7 @@ import { UpgradesPanel } from './ui/panels/UpgradesPanel';
 
 export function App() {
   const started = useGameStore((s) => s.started);
+  const paused = useGameStore((s) => s.paused);
   const activePanel = useGameStore((s) => s.activePanel);
   const settings = useGameStore((s) => s.settings);
   const saveNow = useGameStore((s) => s.saveNow);
@@ -27,6 +30,16 @@ export function App() {
   useEffect(() => {
     soundEngine.setSettings(settings.sfxVolume, settings.musicVolume, settings.muted);
   }, [settings.sfxVolume, settings.musicVolume, settings.muted]);
+
+  // Sync Yandex Games GameplayAPI lifecycle
+  useEffect(() => {
+    void adService.init();
+    if (started && !paused) {
+      adService.notifyGameplayStart();
+    } else {
+      adService.notifyGameplayStop();
+    }
+  }, [started, paused]);
 
   // Periodic auto-save every 15 seconds while actively playing + save on page unload
   useEffect(() => {
@@ -68,6 +81,7 @@ export function App() {
           <TutorialOverlay />
           <BottomDock />
           <ShiftSummaryModal />
+          <AdVideoModal />
         </div>
       )}
     </main>

@@ -83,6 +83,8 @@ function makeInitialState() {
     dailyCars: 0,
     happyHourRemaining: 0,
     happyHourCooldown: 0,
+    adBoostRemaining: 0,
+    adGrantCooldown: 0,
     equipmentCondition: 100,
     activeWashTech: 'manual',
     unlockedWashTechs: ['manual'],

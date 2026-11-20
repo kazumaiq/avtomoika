@@ -18,6 +18,21 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Space+Grotesk:wght@600;700&display=swap"
       rel="stylesheet"
     />
+    <!-- Yandex Games SDK auto-loader (loads /sdk.js when hosted on Yandex Games, silently falls back locally) -->
+    <script>
+      window.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+      });
+      (function () {
+        var s = document.createElement('script');
+        s.src = '/sdk.js';
+        s.async = true;
+        s.onerror = function () {
+          /* Local / standalone mode uses built-in adService simulator */
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

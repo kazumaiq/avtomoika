@@ -991,6 +991,7 @@ class GameSimulation {
 
     const empire = this.callbacks.getEmpire();
     const workerProfile = this.getWorkerProfileById(car.assignedWorkerId);
+    const adSpeedMult = car.owner === 'player' && (eco.adBoostRemaining ?? 0) > 0 ? 1.45 : 1.0;
     const totalSpeed =
       car.owner === 'player'
         ? getEffectivePlayerWashSpeed({
@@ -1003,7 +1004,7 @@ class GameSimulation {
             happyHourActive: eco.happyHourRemaining > 0,
             hasDispatchResearch: empire.unlockedResearchIds.includes('bay_dispatch_ai'),
             hasManagerSpecialist: empire.specialists.some((s) => s.role === 'manager' && s.hired),
-          })
+          }) * adSpeedMult
         : (workerProfile ? workerProfile.speed * workerProfile.morale : 1.0) * comp.speedMultiplier;
 
     const totalRate = totalSpeed / Math.max(8.0, car.washDuration);

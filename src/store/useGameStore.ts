@@ -47,6 +47,7 @@ import {
   loadGameSync,
   saveGameSync,
 } from '../persistence/saveManager';
+import { adService } from '../services/adService';
 import type {
   ActiveCityEvent,
   ActivePanel,
@@ -125,6 +126,11 @@ interface GameStoreState {
   boostVehicleWash: (vehicleId: string) => boolean;
   activateHappyHour: () => boolean;
   claimQuestReward: (questId: string) => boolean;
+
+  // Yandex Games Ad Monetization Actions
+  watchRewardedSponsorAd: () => Promise<boolean>;
+  watchRewardedTurboAd: () => Promise<boolean>;
+  watchRewardedDoubleShiftAd: () => Promise<boolean>;
 
   // Tutorial Actions
   advanceTutorial: () => void;
@@ -280,6 +286,8 @@ function createInitialEconomy(): EconomyMetrics {
     dailyCars: 0,
     happyHourRemaining: 0,
     happyHourCooldown: 0,
+    adBoostRemaining: 0,
+    adGrantCooldown: 0,
     equipmentCondition: 100,
     activeWashTech: 'manual',
     unlockedWashTechs: ['manual'],
@@ -303,9 +311,9 @@ function createInitialUpgrades(): UpgradeLevels {
 }
 
 function detectDefaultQuality(): GameSettings['quality'] {
-  if (typeof window === 'undefined') return 'high';
+  if (typeof window === 'undefined') return 'ultra';
   const cores = navigator.hardwareConcurrency ?? 6;
-  return cores <= 2 ? 'medium' : 'high';
+  return cores <= 2 ? 'medium' : cores <= 4 ? 'high' : 'ultra';
 }
 
 function createInitialSettings(): GameSettings {
@@ -773,7 +781,10 @@ export const useGameStore = create<GameStoreState>((set, get) => {
       onTimeAdvance: (newTimeOfDay, minuteDelta, dtSec) => {
         set((state) => {
           const hasTimers =
-            state.economy.happyHourRemaining > 0 || state.economy.happyHourCooldown > 0;
+            state.economy.happyHourRemaining > 0 ||
+            state.economy.happyHourCooldown > 0 ||
+            state.economy.adBoostRemaining > 0 ||
+            state.economy.adGrantCooldown > 0;
           if (!hasTimers) {
             return {
               timeOfDay: newTimeOfDay,
@@ -787,6 +798,8 @@ export const useGameStore = create<GameStoreState>((set, get) => {
               ...state.economy,
               happyHourRemaining: Math.max(0, state.economy.happyHourRemaining - dtSec),
               happyHourCooldown: Math.max(0, state.economy.happyHourCooldown - dtSec),
+              adBoostRemaining: Math.max(0, (state.economy.adBoostRemaining ?? 0) - dtSec),
+              adGrantCooldown: Math.max(0, (state.economy.adGrantCooldown ?? 0) - dtSec),
             },
           };
         });
@@ -1038,6 +1051,10 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     startNextShift: () => {
       soundEngine.unlock();
       soundEngine.playClick();
+      const prevSummary = get().shiftSummary;
+      const shouldShowInterstitial =
+        prevSummary && !prevSummary.doubledByAd && prevSummary.day >= 1 && prevSummary.day % 2 === 1;
+
       gameSimulation.startNewShift();
 
       set((state) => {
@@ -1164,6 +1181,12 @@ export const useGameStore = create<GameStoreState>((set, get) => {
         };
       });
       get().saveNow();
+      if (shouldShowInterstitial) {
+        void adService.showFullscreenAd({
+          title: 'Рекламная пауза (Яндекс Игры • Interstitial)',
+          onPauseGame: (p) => set({ paused: p }),
+        });
+      }
     },
 
     returnToTitle: () => {
@@ -1278,6 +1301,112 @@ export const useGameStore = create<GameStoreState>((set, get) => {
         };
       });
       pushToastInternal(`🎯 ${def.title}: ${formatRub(def.reward, { signed: true })}`, undefined, 'emerald');
+      get().saveNow();
+      return true;
+    },
+
+    watchRewardedSponsorAd: async () => {
+      const s = get();
+      if ((s.economy.adGrantCooldown ?? 0) > 0) {
+        soundEngine.playError();
+        return false;
+      }
+      const grantAmount = Math.round(7_000 + s.economy.entrepreneurLevel * 1_500 + s.upgrades.bays * 2_000);
+      const wasPaused = s.paused;
+      const rewarded = await adService.showRewardedVideo({
+        title: 'Спонсорский грант (Rewarded Video)',
+        rewardLabel: `+${formatRub(grantAmount)} + мгновенный ремонт`,
+        onPauseGame: (p) => set({ paused: p ? true : wasPaused }),
+      });
+      if (!rewarded) return false;
+
+      soundEngine.playFanfare();
+      set((state) => ({
+        economy: {
+          ...state.economy,
+          balance: state.economy.balance + grantAmount,
+          totalRevenue: state.economy.totalRevenue + grantAmount,
+          dailyRevenue: state.economy.dailyRevenue + grantAmount,
+          equipmentCondition: 100,
+          adGrantCooldown: 90,
+        },
+        workers: state.workers.map((w) => ({ ...w, fatigue: Math.max(0, w.fatigue - 35) })),
+      }));
+      pushToastInternal(
+        `📺 Спонсорский грант: +${formatRub(grantAmount)}`,
+        'Оборудование отремонтировано до 100%',
+        'vip'
+      );
+      get().saveNow();
+      return true;
+    },
+
+    watchRewardedTurboAd: async () => {
+      const s = get();
+      if ((s.economy.adBoostRemaining ?? 0) > 0) {
+        soundEngine.playError();
+        return false;
+      }
+      const wasPaused = s.paused;
+      const rewarded = await adService.showRewardedVideo({
+        title: 'VIP-кортеж и ×1.5 Турбо-мойка (Rewarded Video)',
+        rewardLabel: '45 сек: скорость мойки +50% + волна VIP-клиентов',
+        onPauseGame: (p) => set({ paused: p ? true : wasPaused }),
+      });
+      if (!rewarded) return false;
+
+      soundEngine.playFanfare();
+      set((state) => ({
+        economy: {
+          ...state.economy,
+          adBoostRemaining: 45,
+          happyHourRemaining: Math.max(state.economy.happyHourRemaining, 35),
+        },
+        activeEvent: {
+          id: 'vip_convoy',
+          remainingSec: 36,
+          totalSec: 36,
+        },
+      }));
+      pushToastInternal(
+        '👑 VIP-кортеж + Турбо-буст (45 сек)!',
+        'Скорость мойки +50% и поток золотых VIP-авто',
+        'vip'
+      );
+      return true;
+    },
+
+    watchRewardedDoubleShiftAd: async () => {
+      const s = get();
+      if (!s.shiftSummary || s.shiftSummary.doubledByAd) return false;
+      const bonus = Math.max(4_500, Math.round(Math.max(s.shiftSummary.profit, s.shiftSummary.revenue * 0.45)));
+      const rewarded = await adService.showRewardedVideo({
+        title: 'Удвоение выручки смены (Rewarded Video)',
+        rewardLabel: `+${formatRub(bonus)} к кассе за смену`,
+        onPauseGame: () => {
+          // Shift modal already keeps simulation paused
+        },
+      });
+      if (!rewarded) return false;
+
+      soundEngine.playFanfare();
+      set((state) => {
+        if (!state.shiftSummary) return {};
+        return {
+          economy: {
+            ...state.economy,
+            balance: state.economy.balance + bonus,
+            totalRevenue: state.economy.totalRevenue + bonus,
+          },
+          shiftSummary: {
+            ...state.shiftSummary,
+            revenue: state.shiftSummary.revenue + bonus,
+            profit: state.shiftSummary.profit + bonus,
+            doubledByAd: true,
+          },
+        };
+      });
+      pushToastInternal(`📺 Бонус смены ×2: +${formatRub(bonus)}!`, 'Зачислено на баланс компании', 'vip');
       get().saveNow();
       return true;
     },

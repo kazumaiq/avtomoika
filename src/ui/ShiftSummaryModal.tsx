@@ -1,11 +1,16 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Car, Flame, Moon, Sunrise, TrendingUp } from 'lucide-react';
+import { Car, CheckCircle2, Film, Flame, Moon, Sunrise, TrendingUp } from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
 import { formatRub } from '../utils/currency';
 
 export function ShiftSummaryModal() {
   const summary = useGameStore((s) => s.shiftSummary);
   const startNextShift = useGameStore((s) => s.startNextShift);
+  const watchRewardedDoubleShiftAd = useGameStore((s) => s.watchRewardedDoubleShiftAd);
+
+  const adBonus = summary
+    ? Math.max(4_500, Math.round(Math.max(summary.profit, summary.revenue * 0.45)))
+    : 0;
 
   return (
     <AnimatePresence>
@@ -58,9 +63,42 @@ export function ShiftSummaryModal() {
               </div>
             </div>
 
-            <div style={{ fontSize: 11.5, color: '#94a3b8', margin: '0 0 12px', textAlign: 'center' }}>
+            <div style={{ fontSize: 11.5, color: '#94a3b8', margin: '0 0 8px', textAlign: 'center' }}>
               Расходы: {formatRub(summary.expenses)} • Налоги: {formatRub(summary.taxes)}
             </div>
+
+            {/* Yandex Games Rewarded Video Placement: Double Shift Payout */}
+            {!summary.doubledByAd ? (
+              <button
+                id="btn-ad-double-shift"
+                type="button"
+                className="btn-primary start-btn-lg"
+                style={{
+                  background: 'linear-gradient(135deg, #f59e0b, #eab308)',
+                  color: '#09101c',
+                  marginBottom: 6,
+                }}
+                onClick={() => void watchRewardedDoubleShiftAd()}
+              >
+                <Film size={17} />
+                <span>Удвоить итог за видео (+{formatRub(adBonus)})</span>
+              </button>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: '#4ade80',
+                  marginBottom: 6,
+                }}
+              >
+                <CheckCircle2 size={15} /> Рекламный бонус ×2 получен!
+              </div>
+            )}
 
             <button
               id="btn-next-shift"

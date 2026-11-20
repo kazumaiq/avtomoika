@@ -20,6 +20,7 @@ export function SettingsPanel() {
     { id: 'low', label: 'Низкая' },
     { id: 'medium', label: 'Средняя' },
     { id: 'high', label: 'Высокая' },
+    { id: 'ultra', label: 'Ультра HD' },
   ];
 
   const timeModes: Array<{ id: TimeOfDayMode; label: string }> = [
@@ -170,6 +171,15 @@ export function SettingsPanel() {
             <GraduationCap size={15} color="#00d4ff" />
             Пройти обучение заново
           </button>
+        </div>
+
+        {/* Yandex Games Monetization Status & Test Card */}
+        <div className="ui-card" style={{ borderColor: 'rgba(250, 204, 21, 0.35)' }}>
+          <span className="section-label">Яндекс Игры • Рекламная монетизация</span>
+          <span className="card-sub">
+            Подключены: <strong>Rewarded Video</strong> (Спонсорский грант, VIP-буст ×1.5, Удвоение смены ×2) и{' '}
+            <strong>Fullscreen Interstitial</strong> между сменами с авто-паузой звука и <code>GameplayAPI</code>.
+          </span>
         </div>
 
         {/* Save & Reset */}

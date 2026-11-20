@@ -240,6 +240,44 @@ export function BusinessPanel() {
               </div>
             </div>
 
+            {/* Rewarded Video Boosts (Yandex Games Monetization) */}
+            <div className="ui-card" style={{ borderColor: 'rgba(250, 204, 21, 0.45)' }}>
+              <div className="ui-card-row">
+                <div>
+                  <div className="card-title" style={{ color: '#facc15' }}>
+                    📺 Спонсорский грант и VIP-кортеж
+                  </div>
+                  <div className="card-sub">
+                    Быстрый бонус за просмотр короткого видеоролика
+                  </div>
+                </div>
+              </div>
+              <div className="ui-card-row" style={{ gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-primary btn-amber"
+                  style={{ flex: 1 }}
+                  disabled={(economy.adGrantCooldown ?? 0) > 0}
+                  onClick={() => void useGameStore.getState().watchRewardedSponsorAd()}
+                >
+                  {(economy.adGrantCooldown ?? 0) > 0
+                    ? `Грант (${Math.ceil(economy.adGrantCooldown)}с)`
+                    : `+${formatRub(Math.round(7_000 + economy.entrepreneurLevel * 1_500 + upgrades.bays * 2_000))} + Ремонт`}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ flex: 1 }}
+                  disabled={(economy.adBoostRemaining ?? 0) > 0}
+                  onClick={() => void useGameStore.getState().watchRewardedTurboAd()}
+                >
+                  {(economy.adBoostRemaining ?? 0) > 0
+                    ? `VIP ×1.5 (${Math.ceil(economy.adBoostRemaining)}с)`
+                    : 'VIP-кортеж ×1.5'}
+                </button>
+              </div>
+            </div>
+
             {/* Happy Hour */}
             <div className="ui-card">
               <div className="ui-card-row">
